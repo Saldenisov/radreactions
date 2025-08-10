@@ -1,0 +1,4 @@
+160	Hydroperoxide Ion	$\ce{.OH + HO_2^- -> O_2^{.-} + H_2O}$		$7.5 \times 10^{9}$	p.r.; P.b.k. ($\ce{O_2^-}$) at 250-270 nm from pH dependence (6.8-13.8). Assumes equilibrium between OH and O$^-$ is maintained; best value.	82A096
+			7.7-11	$6.8 \times 10^{9}$	p.r.; Calcd. from c.k. with luminol, pK($\ce{H_2O_2}$) = 11.65.; rel. to k($\ce{.OH + luminol}$).	80A221
+			11	$5.6 \times 10^{9}$	p.r.; C.k.; calcd. from 1.4k + k($\ce{O^- + H_2O_2}$) = $8 \times 10^9$, pK($\ce{H_2O_2}$) = 11.75 and pK($\ce{.OH}$) = 11.9. Assumes equilibrium between $\ce{.OH}$ and $\ce{.O^-}$ is maintained; rel. to k($\ce{.OH + CO_3^{2-}}$).	690379
+			13	$8.3 \times 10^{9}$	p.r.; P.b.k. at 260 nm; pH study; assumes equilibrium between $\ce{.OH}$ and $\ce{.O^-}$ is maintained.	680298

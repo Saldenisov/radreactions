@@ -1,0 +1,9 @@
+6	Methanol	$\ce{.OH + CH3OH -> H2O + .CH2OH}$	6	$1.0 \times 10^{9}$	p.r.; C.k.; obs. ABTS^{+} formn. at 415 nm; rel. to k(\ce{.OH} + ABTS).	82A196
+			nat.	$9.7 \times 10^{8}$	p.r.; C.k.; rel. to k(\ce{.OH} + Fe(\ce{CN}_6^{4-})).	710578
+			9.5	$9.7 \times 10^{8}$	p.r.; C.k.; rel. to k(\ce{.OH} + RNO).	690156
+			8.3	$8.3 \times 10^{8}$	p.r.; C.k.; obs. hydroxycyclohexadienyl radical buildup; rel. to k(\ce{.OH} + BzO^-).	680304
+			8.3	$8.3 \times 10^{8}$	p.r.; C.k.; rel. to k(\ce{.OH} + PNBA^-).	680304
+			8.3	$8.3 \times 10^{8}$	p.r.; C.k.; rel. to k(\ce{.OH} + PA^-).	680304
+			10.7	$8.8 \times 10^{8}$	p.r.; C.k.; rel. to k(\ce{.OH} + CO_3^{2-}).	650190
+			7.0	$7.8 \times 10^{8}$	p.r.; C.k.; rel. to k(\ce{.OH} + SCN^-).	650190
+			7	$8.0 \times 10^{8}$	p.r.; C.k., at pH 2 $k = 1.2 \times 10^{9}$; rel. to k(\ce{.OH} + SCN^-).	650387

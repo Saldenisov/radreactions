@@ -1,0 +1,14 @@
+1	Ethanol	$\ce{\cdot OH + C2H5OH -> H2O + CH3\cdot CHOH}$	6	$1.9 \times 10^{9}$	p.r.; C.k.; obs. ABTS^{\cdot +} formn. at 415 nm; rel. to $k'$(\cdot OH + ABTS).	82A196
+				$1.9 \times 10^{9}$	p.r.; C.k.; rel. to $k'$(\cdot OH + Fe(CN)_6^{4-}).	731046
+			nat.	$2.1 \times 10^{9}$	p.r.; C.k.; rel. to $k'$(\cdot OH + Fe(CN)_6^{4-}).	710578
+			11	$2.1 \times 10^{9}$	p.r.; C.k.; assume $pK_a$(\cdot OH) = 11.9; rel. to $k'$(\cdot OH + CO_3^{2-}).	700511
+				$1.6 \times 10^{9}$	p.r.; C.k.; rel. to $k'$(\cdot OH + RNO).	690156
+				$1.8 \times 10^{9}$	p.r.; C.k.; rel. to $k'$(\cdot OH + PA^{-}).	680304
+				$1.8 \times 10^{9}$	p.r.; C.k.; rel. to $k'$(\cdot OH + PNBA^{-}).	680304
+				$1.8 \times 10^{9}$	p.r.; C.k.; obs. hydroxycyclohexadienyl radical buildup; rel. to $k'$(\cdot OH + BzO^{-}).	680304
+				$2.0 \times 10^{9}$	p.r.; C.k. with HSO_4^{-}, measured abs. at 450 nm (SO_4^{\cdot -}); rel. to $k'$(\cdot OH + MeOH).	660019
+			7	$2.2 \times 10^{9}$	p.r.; C.k.; rel. to $k'$(\cdot OH + Fe(CN)_6^{4-}).	650007
+			3, 10.5	$1.7 \times 10^{9}$	$\gamma$-r.; C.k.; measured $^{14}$CO_2; rel. to $k'$(\cdot OH + BzO^{-}).	650099
+			7	$1.8 \times 10^{9}$	p.r.; C.k.; rel. to $k'$(\cdot OH + SCN^{-}).	650190
+			7, 10.7	$1.9 \times 10^{9}$	p.r.; C.k.; rel. to $k'$(\cdot OH + CO_3^{2-}).	650190
+			7	$1.9 \times 10^{9}$	p.r.; C.k., at pH 2 $k = 2.8 \times 10^9$; rel. to $k'$(\cdot OH + SCN^{-}).	650387

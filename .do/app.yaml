@@ -1,0 +1,21 @@
+name: ocr-validator-app
+services:
+- name: web
+  source_dir: /
+  github:
+    repo: your-username/ocr-validator-app
+    branch: main
+  run_command: streamlit run app.py --server.port=8080 --server.address=0.0.0.0
+  environment_slug: python
+  instance_count: 1
+  instance_size_slug: basic-xxs
+  http_port: 8080
+  health_check:
+    http_path: /
+  envs:
+  - key: BASE_DIR
+    value: /app/data
+  - key: STREAMLIT_SERVER_HEADLESS
+    value: "true"
+  - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
+    value: "false"

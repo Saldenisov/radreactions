@@ -1,0 +1,4 @@
+12.1	Ozonide Ion	$\ce{O3^{.-} + \cdot OH ->}$	10-13	$8.5 \times 10^9$	p.r.; D.k. at 430 nm as well as p.b.k. at 260 nm in soln. (under 40 atm. of $N_2O$) contg. $1.2 \times 10^{-3}$ mol L$^{-1}$ $O_2$ and $0.9$ mol L$^{-1}$ $N_2O$; computer simulation; overall reaction; products are $O_2^{.-}$ (re-forming $O_3^{.-}$) and $OH^-$ + $O_3$ (about 30% of total reaction).	84A040
+		$\ce{O3^{.-} + O_2^{.-} -> O_2^{.-} + O_2^{.-}}$	13-14	$7.0 \times 10^8$	p.r.; D.k. at 430 nm ($O_3^{.-}$) as well simultaneous buildup at 250 nm ($O_2^{.--}$) and decay, in soln. satd. with $4\times 10^6$ N m$^{-2}$ $N_2O$ and $0-1 \times 10^6$ N m$^{-2}$ $O_2$; computer simulation.	82A133
+		$\ce{O3^{.-} + O^{.-} -> O_4^{2-}}$	$>$13	$\sim 7\times 10^8$	p.r.; D.k. ($O_3^{.-}$); $k$ estd. from steady state approx. for [$O^{.-}$]; rel. to $k'$(O$^{.-}$ + $O_2$).	690002
+			13-13.7	$8\times 10^8$	f.p.; D.k. at 430 nm; complex anal. uses other rate constants.	687277

@@ -1,0 +1,15 @@
+1.1	Hydrated electron	$\ce{e_{aq}^{-} + e_{aq}^{-} -> H2 + OH^-}$		$5.5 \times 10^9$	Selected value	
+			11-13	$5.0 \times 10^9$	p.r.; D.k.; \emph{tert}-BuOH or H$_2$ as .OH scavenger; temperature dependence (5-300 $^\circ$C) was studied.	86A009
+			12.8	$5 \times 10^9$	f.p.; Phot. of OH$^-$; d.k. at 700 nm; [H$_2$] $= 7 \times 10^{-4}$ mol L$^{-1}$, [NaOH] $= 7 \times 10^{-2}$ mol L$^{-1}$.	86A329
+			12	$7 \times 10^9$	p.r.; D.k. at 600 nm; value of from graph; $\epsilon$(600 nm) = 11,500 L mol$^{-1}$ cm$^{-1}$; ([H$_2$] = $8 \times 10^{-2}$ mol L$^{-1}$; activation energy determined at 15-60$^\circ$C.	85A373
+			11.6-13	$5.0 \times 10^9$	p.r.; D.k. at 600 nm in soln. under 30 atm. H$_2$ ([H$_2$] = $2.7 \times 10^{-2}$ and $2.1 \times 10^{-2}$ mol L$^{-1}$ at 5 and 65$^\circ$C, resp.) taking $\epsilon$ = 12,400 L mol$^{-1}$ cm$^{-1}$.	76A250
+			10.5	$6.2 \times 10^9$	p.r.; D.k. at 575 nm in solution under 100 atm. H$_2$ taking $\epsilon$ = 10,500 L mol$^{-1}$ cm$^{-1}$.	751036
+			12.7	$5.0 \times 10^9$	p.r.; Apparent change in $k$ with pH has been obs.; $k$ cor. for I.	700749
+			alk.	$5.8 \times 10^9$	f.p.; D.k.; H$_2$-satd.; $\epsilon$ = 10,900 L mol$^{-1}$ cm$^{-1}$ at 578 nm.	697106
+			11	$6 \times 10^9$	D.k. at 700 nm; soln. H$_2$-satd.; $\epsilon$ = 18,500 L mol$^{-1}$ cm$^{-1}$.	687143
+			13.3	$5.5 \times 10^9$	p.r.; D.k. at 578 nm; soln. in equil. with 100 atm. H$_2$; $\epsilon = 10,600$ L mol$^{-1}$ cm$^{-1}$.	650009
+			10.9	$5.0 \times 10^9$	p.r.; D.k. at 578 nm assuming $\epsilon = 10.4 \times 10^3$ L mol$^{-1}$ cm$^{-1}$; contg. EtOH, MeOH or ferrocyanide.	630073
+1.2		$\ce{H^{.} + e_{aq}^{-} -> H2 + OH^-}$	10.5	$2.5 \times 10^{10}$	p.r.; Calcd. from d.k. at 578 nm; soln. is in equil. with 100 atm. H$_2$.	650009
+1.3		$\ce{.OH + e_{aq}^{-} -> OH^-}$	10.5	$3.0 \times 10^{10}$	p.r.; Calcd. from d.k. at 578 nm; soln. contains NaOH.	850009
+1.4		$\ce{O^{.-} + e_{aq}^{-} -> OH^-}$	13	$2.2 \times 10^{10}$	p.r.; D.k. at 578 nm; soln. in equil. with 50 atm. H$_2$ contains NaOH; assuming that $2(\ce{O^{.-} + O^{-}}) = 2(\ce{e_{aq}^{-} + e_{aq}^{-}})$ and $\epsilon(\ce{aq^{-}}) = 10,600$ L mol$^{-1}$ cm$^{-1}$.	650009
+1.5		$\ce{O_2^{.-} + e_{aq}^{-} -> O_2^{2-}}$	11.1	$1.3 \times 10^{10}$	p.r.; Calcd. from d.k. at 650 nm.	710171

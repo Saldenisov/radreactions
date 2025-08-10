@@ -1,0 +1,6 @@
+2.1	Hydrogen atom	$\ce{H\cdot + H\cdot -> H2}$	1	$9 \times 10^{9}$	p.r.; esr; Calcd. from time profile and absorbed dose in deaerated soln. contg. $10^{-2}$ mol L$^{-1}$ tert-BuOH; flow system.	83A153
+→→→1	$1.2 \times 10^{10}$	p.r.; esr; Calcd. from obs. half-life and concn. in soln. contg. $2 \times 10^{-3}$ mol L$^{-1}$ tert-BuOH and 0.1 mol L$^{-1}$ HClO$_4$.	775254
+2.2	•OH + H•	$\ce{OH\cdot + H\cdot -> H2O}$	3	$7.8 \times 10^{9}$	p.r.; D.k. at 200 nm; $\varepsilon = 900$ L mol$^{-1}$ cm$^{-1}$.	690083
+→→→3	$7 \times 10^{9}$	p.r.; D.k. at 260 nm (•OH).	650010
+2.3	HO$_2$• + H•	$\ce{HO2\cdot + H\cdot -> H2O2}$	<3	$2 \times 10^{10}$	p.r.; Obs. G(Fe$^{3+}$) in FeSO$_4$-CuSO$_4$ soln. at various dose rates.	700063
+→→→0.4	$1 \times 10^{10}$	p.r.; Obs. G(H$_2$); rel. to k(•H + •H).	630043

@@ -1,0 +1,7 @@
+67	Copper(II) Ion	$\ce{.OH + Cu^{2+} -> CuOH^{2+}}$		$3.5 \times 10^8$	Average of 6 values.	80A187
+			$3.1 \times 10^8$	p.r.; P.b.k. at 300 nm.	710174
+	3-6		$3.1 \times 10^8$	p.r.; P.b.k. at 300 nm.	710775
+	~5		$4.0 \times 10^8$	p.r.; C.k. (condy. study); assume $k(\ce{.OH + MeOH})/k(\ce{.OH + tert-BuOH}) = 2$ and $k'(\ce{.OH + MeOH}) = 9 \times 10^8$; rel. to $k'(\ce{.OH + tert-BuOH})$.	700512
+	7		$3.5 \times 10^8$	p.r.; P.b.k. at 313 nm.	650044
+			$3.7 \times 10^8$	p.r.; C.k.; obs. Cu(III) at 313 nm; rel. to $k'(\ce{.OH + EtOH})$.	650394
+			$3.7 \times 10^8$	p.r.; C.k.; obs. Cu(III) at 313 nm; rel. to $k'(\ce{.OH + MeOH})$.	650394
