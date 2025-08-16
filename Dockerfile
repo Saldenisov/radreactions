@@ -40,6 +40,9 @@ ENV PYTHONPATH=/app
 # Health check
 HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
 
-# Run the application
-# Use PORT environment variable if available (for cloud platforms)
-CMD streamlit run app.py --server.port=${PORT:-8501} --server.address=0.0.0.0 --server.headless=true
+# Add startup script that reads $PORT and launches Streamlit
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
+
+# Run the application via startup script (ensures $PORT is honored)
+CMD ["/start.sh"]
