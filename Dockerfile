@@ -24,11 +24,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Copy full dataset for internet deployment
+# Bake full dataset into the image for cloud deployment (Railway)
 COPY data-full/ /app/data/
 
-# Create data directory for mounting
-RUN mkdir -p /app/data-mount
+# Ensure data directory exists
+RUN mkdir -p /app/data
 
 # Expose Streamlit port
 EXPOSE 8501
