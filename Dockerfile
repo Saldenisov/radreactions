@@ -42,7 +42,8 @@ HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
 
 # Add startup script that reads $PORT and launches Streamlit
 COPY start.sh /start.sh
-RUN chmod +x /start.sh
+# Normalize line endings in case the repo was edited on Windows
+RUN sed -i 's/\r$//' /start.sh && chmod +x /start.sh
 
 # Run the application via startup script (ensures $PORT is honored)
 CMD ["/start.sh"]

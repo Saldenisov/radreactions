@@ -157,7 +157,7 @@ if st.sidebar.button("Download All Tables DBs"):
     )
 
 # === Main Page Tabs ===
-tab1, tab2 = st.tabs(['Image', 'TSV'])
+tab1, tab2, tab3 = st.tabs(['Image', 'TSV', 'LaTeX'])
 
 # === IMAGE TAB ===
 with tab1:
@@ -181,14 +181,24 @@ with tab1:
 # === TSV TAB ===
 with tab2:
     st.header('Edit TSV')
-    tsv_path = TSV_DIR / (Path(current_image).stem + '.csv')
+    # Support both .tsv and legacy .csv (tab-delimited) files
+    stem = Path(current_image).stem
+    tsv_candidate = TSV_DIR / f"{stem}.tsv"
+    csv_candidate = TSV_DIR / f"{stem}.csv"
+    if tsv_candidate.exists():
+        tsv_path = tsv_candidate
+    elif csv_candidate.exists():
+        tsv_path = csv_candidate
+    else:
+        # default to creating a .tsv on save if nothing exists yet
+        tsv_path = tsv_candidate
     tab_symbol = "→"
 
-    if tsv_path.exists():
+    if tsv_candidate.exists() or csv_candidate.exists():
         tsv_text = tsv_path.read_text(encoding='utf-8')
     else:
         tsv_text = ''
-        st.error('TSV not found')
+        st.info('No TSV/CSV found yet for this image. You can create one and save.')
 
     # Session state: show fixed/corrected TSV after saving
     session_key = f'edited_visible_{current_image}'
@@ -202,7 +212,7 @@ with tab2:
         key=f'tsv_text_area_{current_image}'
     )
 
-    if st.button('Save and Recompile'):
+    if st.button('Save and Recompile from TSV'):
         # Write user edits as raw TSV, then apply correction and update text area
         edited_tsv = visible_to_tsv(edited_visible, tab_symbol=tab_symbol)
         tsv_path.write_text(edited_tsv, encoding='utf-8')
@@ -210,8 +220,15 @@ with tab2:
         st.session_state[session_key] = tsv_to_visible(corrected_tsv_text, tab_symbol=tab_symbol)
         tsv_text = corrected_tsv_text
 
-        # Recompile LaTeX and show PDF
+        # Recreate LaTeX from TSV and compile
         latex_path = tsv_to_full_latex_article(tsv_path)
+        # Also update LaTeX editor content so it's in sync when switching tabs
+        latex_session_key = f'edited_latex_{current_image}'
+        try:
+            st.session_state[latex_session_key] = latex_path.read_text(encoding='utf-8')
+        except Exception:
+            pass
+
         returncode, out = compile_tex_to_pdf(latex_path)
         if returncode != 0:
             st.error(f'Compilation failed:\n{out}')
@@ -220,3 +237,76 @@ with tab2:
             doc = fitz.open(latex_path.parent / (latex_path.stem + '.pdf'))
             pix = doc.load_page(0).get_pixmap(matrix=fitz.Matrix(2,2))
             st.image(pix.tobytes(output='png'), use_container_width=True)
+
+# === LaTeX TAB ===
+with tab3:
+    st.header('Edit LaTeX')
+    # Determine the same TSV path candidates to infer LaTeX location
+    stem = Path(current_image).stem
+    tsv_candidate = TSV_DIR / f"{stem}.tsv"
+    csv_candidate = TSV_DIR / f"{stem}.csv"
+    if tsv_candidate.exists():
+        base_tsv_path = tsv_candidate
+    elif csv_candidate.exists():
+        base_tsv_path = csv_candidate
+    else:
+        base_tsv_path = tsv_candidate  # will be created on regeneration
+
+    # LaTeX path follows pdf_utils: TSV_DIR/<...>/latex/<stem>.tex
+    latex_path = (base_tsv_path.parent / 'latex' / f'{stem}.tex')
+
+    col_gen, col_save, col_compile = st.columns([1,1,1])
+    with col_gen:
+        if st.button('Recreate LaTeX from TSV'):
+            try:
+                lp = tsv_to_full_latex_article(base_tsv_path)
+                # Refresh editor content immediately with regenerated LaTeX
+                try:
+                    st.session_state[latex_session_key] = lp.read_text(encoding='utf-8')
+                except Exception:
+                    pass
+                st.success(f'Regenerated: {lp.name}')
+            except Exception as e:
+                st.error(f'Failed to regenerate LaTeX: {e}')
+
+    # Load or create LaTeX content for editing
+    if latex_path.exists():
+        latex_text = latex_path.read_text(encoding='utf-8')
+    else:
+        latex_text = ''
+        st.info('No LaTeX file yet. Click "Recreate LaTeX from TSV" to generate.')
+
+    latex_session_key = f'edited_latex_{current_image}'
+    if latex_session_key not in st.session_state:
+        st.session_state[latex_session_key] = latex_text
+
+    edited_latex = st.text_area(
+        'LaTeX content (.tex)',
+        value=st.session_state[latex_session_key],
+        height=500,
+        key=f'latex_text_area_{current_image}'
+    )
+
+    with col_save:
+        if st.button('Save LaTeX'):
+            # Ensure directory exists
+            latex_path.parent.mkdir(parents=True, exist_ok=True)
+            latex_path.write_text(edited_latex, encoding='utf-8')
+            st.session_state[latex_session_key] = edited_latex
+            st.success('LaTeX saved.')
+
+    with col_compile:
+        if st.button('Compile from LaTeX'):
+            if not latex_path.exists():
+                st.error('No LaTeX file found. Generate or save it first.')
+            else:
+                returncode, out = compile_tex_to_pdf(latex_path)
+                if returncode != 0:
+                    st.error(f'Compilation failed:\n{out}')
+                else:
+                    st.success('Compiled LaTeX successfully!')
+                    pdf_file = latex_path.parent / (latex_path.stem + '.pdf')
+                    if pdf_file.exists():
+                        doc = fitz.open(pdf_file)
+                        pix = doc.load_page(0).get_pixmap(matrix=fitz.Matrix(2,2))
+                        st.image(pix.tobytes(output='png'), use_container_width=True)
