@@ -10,7 +10,18 @@ AVAILABLE_TABLES = ['table5', 'table6', 'table7', 'table8', 'table9']
 # 3) Local Windows development path
 _env_base = os.getenv('BASE_DIR')
 if _env_base:
-    BASE_DIR = Path(_env_base)
+    # If env var provided but path doesn't exist, fall back to common candidates
+    _env_path = Path(_env_base)
+    if _env_path.exists():
+        BASE_DIR = _env_path
+    else:
+        candidates = [Path('/app/data'), Path('/data'), Path(r"E:\\ICP_notebooks\\Buxton")]
+        for _p in candidates:
+            if _p.exists():
+                BASE_DIR = _p
+                break
+        else:
+            BASE_DIR = Path('/app/data')
 else:
     candidates = [Path('/app/data'), Path('/data'), Path(r"E:\\ICP_notebooks\\Buxton")]
     for _p in candidates:

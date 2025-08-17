@@ -4,7 +4,7 @@ from pathlib import Path
 import json
 import io
 from datetime import datetime
-from config import AVAILABLE_TABLES, get_table_paths
+from config import AVAILABLE_TABLES, get_table_paths, BASE_DIR
 from db_utils import load_db, get_stats_for_table, aggregate_stats
 from tsv_utils import tsv_to_visible, visible_to_tsv, correct_tsv_file
 from pdf_utils import tsv_to_full_latex_article, compile_tex_to_pdf
@@ -34,6 +34,11 @@ st.sidebar.markdown("---")
 
 # === Paths and DB for current table ===
 IMAGE_DIR, PDF_DIR, TSV_DIR, DB_PATH = get_table_paths(table_choice)
+# Debug info to help diagnose path issues in deployments
+st.sidebar.markdown(f"BASE_DIR: {BASE_DIR}")
+st.sidebar.markdown(f"IMAGE_DIR exists: {IMAGE_DIR.exists()}")
+st.sidebar.markdown(f"IMAGE_DIR: {IMAGE_DIR}")
+
 db = load_db(DB_PATH, IMAGE_DIR)
 
 table_total, table_validated, table_percent = get_stats_for_table(db)
