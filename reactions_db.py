@@ -284,3 +284,34 @@ def count_reactions(con: sqlite3.Connection) -> int:
     return int(row[0]) if row else 0
 
 
+def list_reactions(con: sqlite3.Connection, *, name_filter: Optional[str] = None, limit: int = 1000) -> List[sqlite3.Row]:
+    """List reactions ordered A->Z by name (fallback to canonical)."""
+    if name_filter:
+        like = f"%{name_filter.lower()}%"
+        sql = (
+            "SELECT * FROM reactions WHERE lower(COALESCE(reaction_name, formula_canonical)) LIKE ? "
+            "ORDER BY lower(COALESCE(reaction_name, formula_canonical)) ASC LIMIT ?"
+        )
+        return con.execute(sql, (like, limit)).fetchall()
+    sql = (
+        "SELECT * FROM reactions ORDER BY lower(COALESCE(reaction_name, formula_canonical)) ASC LIMIT ?"
+    )
+    return con.execute(sql, (limit,)).fetchall()
+
+
+def get_reaction_with_measurements(con: sqlite3.Connection, reaction_id: int) -> Dict[str, Any]:
+    r = con.execute("SELECT * FROM reactions WHERE id = ?", (reaction_id,)).fetchone()
+    if not r:
+        return {}
+    ms = con.execute(
+        """
+        SELECT m.*, re.buxton_code, re.citation_text, re.doi, re.doi_status
+        FROM measurements m
+        LEFT JOIN references_map re ON m.reference_id = re.id
+        WHERE m.reaction_id = ?
+        ORDER BY m.id ASC
+        """,
+        (reaction_id,)
+    ).fetchall()
+    return {"reaction": r, "measurements": ms}
+
