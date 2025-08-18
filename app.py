@@ -131,86 +131,38 @@ st.markdown("---")
 st.header("🔍 Search Reactions Database")
 
 if current_user:
-    st.info("🔓 **Authenticated Search**: You have full access to all data and advanced search features.")
+    st.info("🔓 Authenticated Search: full access to DB and advanced filters.")
 else:
-    st.info("🌐 **Public Search**: Basic search across validated reactions. Login for advanced features and validation access.")
+    st.info("🌐 Public Search: basic search across reactions DB.")
 
-query = st.text_input("Search reactions (case-insensitive)", placeholder="e.g. hydroxyl, rate, Arrhenius, H2O2, CO2")
+query = st.text_input("Search reactions (text or formula)", placeholder="e.g. e_aq^- OH•, hydroxyl, O2•-", key="search_query")
 max_hits = st.number_input("Max results", min_value=1, max_value=200, value=25, step=1)
 
-# Search filters (more available for logged-in users)
+# Filters
 with st.expander("🔧 Advanced Search Options"):
-    if current_user:
-        search_scope = st.selectbox(
-            "Search scope:",
-            ["All files", "Validated only", "Unvalidated only"]
-        )
-        include_metadata = st.checkbox("Include file metadata in results", value=True)
-    else:
-        st.info("Advanced search options available after login.")
-        search_scope = "All files"
-        include_metadata = False
+    table_filter = st.selectbox("Table (category)", options=["All", 5,6,7,8,9], format_func=lambda x: {"All":"All",5:"Table5 (water radiolysis)",6:"Table6 (e_aq^-) ",7:"Table7 (H•)",8:"Table8 (OH•)",9:"Table9 (O•−)"}[x] if x!="All" else "All")
 
 if query:
-    base = BASE_DIR
-    results = []
+    from reactions_db import ensure_db, search_reactions, count_reactions
+    con = ensure_db()
+    table_no = None if table_filter == "All" else int(table_filter)
     try:
-        # Basic search across TSV/CSV files
-        for tsv_path in base.rglob("*.tsv"):
-            try:
-                text = tsv_path.read_text(encoding='utf-8', errors='ignore')
-            except Exception:
-                continue
-            if query.lower() in text.lower():
-                results.append(tsv_path)
-                if len(results) >= max_hits:
-                    break
-        
-        if len(results) < max_hits:
-            for csv_path in base.rglob("*.csv"):
-                try:
-                    text = csv_path.read_text(encoding='utf-8', errors='ignore')
-                except Exception:
-                    continue
-                if query.lower() in text.lower():
-                    results.append(csv_path)
-                    if len(results) >= max_hits:
-                        break
+        rows = search_reactions(con, query, table_no=table_no, limit=int(max_hits))
     except Exception as e:
-        st.error(f"Search error: {e}")
-        results = []
-
-    st.write(f"Found {len(results)} matches")
-    
-    if results:
-        for i, p in enumerate(results, 1):
-            with st.expander(f"Result {i}: {p.name}"):
-                st.code(f"Path: {p}")
-                if current_user and include_metadata:
-                    try:
-                        stat = p.stat()
-                        st.write(f"**Size:** {stat.st_size} bytes")
-                        st.write(f"**Modified:** {stat.st_mtime}")
-                    except Exception:
-                        pass
-                
-                # Show snippet of content
-                try:
-                    content = p.read_text(encoding='utf-8', errors='ignore')
-                    # Find query in content and show context
-                    query_pos = content.lower().find(query.lower())
-                    if query_pos != -1:
-                        start = max(0, query_pos - 100)
-                        end = min(len(content), query_pos + 100)
-                        snippet = content[start:end]
-                        if start > 0:
-                            snippet = "..." + snippet
-                        if end < len(content):
-                            snippet = snippet + "..."
-                        st.text(f"Context: {snippet}")
-                except Exception:
-                    st.write("Could not read file content")
+        st.error(f"DB search error: {e}")
+        rows = []
+    st.write(f"Found {len(rows)} matches")
+    if rows:
+        for i, r in enumerate(rows, 1):
+            with st.expander(f"Result {i}: {r['formula_canonical']}"):
+                st.markdown(f"**Table:** {r['table_no']} ({r['table_category']})")
+                if r['reaction_name']:
+                    st.markdown(f"**Name:** {r['reaction_name']}")
+                st.latex(r['formula_latex'])
+                st.code(f"Reactants: {r['reactants']}\nProducts: {r['products']}")
+                if r['notes']:
+                    st.markdown(f"**Notes:** {r['notes']}")
     else:
         st.info("No results found. Try different search terms.")
 else:
-    st.info("Enter a search term above to find reactions in the database.")
+    st.info("Enter a search term above to find reactions.")
