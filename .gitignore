@@ -39,6 +39,7 @@ data-sample/
 # Authentication and user data (SECURITY CRITICAL)
 users.json
 registration_requests.json
+users.db
 
 # Database files
 *.db

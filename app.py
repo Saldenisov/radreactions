@@ -1,7 +1,7 @@
 import streamlit as st
 from pathlib import Path
 from config import BASE_DIR
-from auth import check_authentication, show_login_page, logout_user, user_manager
+from auth_db import check_authentication, show_login_page, logout_user, auth_db
 
 st.set_page_config(page_title="Radical Reactions Platform (Buxton)", layout="wide")
 
@@ -67,9 +67,9 @@ if st.session_state.get('show_login', False) and not current_user:
             
         if submit_button:
             if username and password:
-                success, message = user_manager.authenticate_user(username, password)
+                success, message = auth_db.authenticate_user(username, password)
                 if success:
-                    from auth import login_user
+                    from auth_db import login_user
                     login_user(username)
                     st.session_state.show_login = False
                     st.success(message)

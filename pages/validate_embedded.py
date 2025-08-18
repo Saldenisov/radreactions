@@ -7,7 +7,7 @@ from config import AVAILABLE_TABLES, get_table_paths, BASE_DIR
 from db_utils import load_db, get_stats_for_table, aggregate_stats
 from tsv_utils import tsv_to_visible, visible_to_tsv, correct_tsv_file
 from pdf_utils import tsv_to_full_latex_article, compile_tex_to_pdf
-from auth import show_user_profile_page
+from auth_db import show_user_profile_page
 
 # Try import fitz (PyMuPDF)
 try:
