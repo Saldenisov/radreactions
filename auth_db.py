@@ -353,6 +353,122 @@ class UserAuthDB:
         """Check if user has admin privileges"""
         user_info = self.get_user_info(username)
         return user_info and user_info.get('role') == 'admin'
+    
+    def is_super_admin(self, username: str) -> bool:
+        """Check if user has super admin privileges (saldenisov only)"""
+        return username == 'saldenisov' and self.is_admin(username)
+    
+    def promote_to_admin(self, username: str) -> Tuple[bool, str]:
+        """Promote user to admin role - Super Admin function"""
+        with self.lock:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("UPDATE users SET role = 'admin' WHERE username = ?", (username,))
+                
+                if cursor.rowcount == 0:
+                    return False, "User not found"
+                
+                conn.commit()
+                return True, f"User '{username}' promoted to admin"
+    
+    def demote_from_admin(self, username: str) -> Tuple[bool, str]:
+        """Demote admin to user role - Super Admin function"""
+        if username == 'saldenisov':
+            return False, "Cannot demote super admin"
+            
+        with self.lock:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("UPDATE users SET role = 'user' WHERE username = ?", (username,))
+                
+                if cursor.rowcount == 0:
+                    return False, "User not found"
+                
+                conn.commit()
+                return True, f"User '{username}' demoted to user"
+    
+    def reset_user_password(self, username: str, new_password: str) -> Tuple[bool, str]:
+        """Reset user password - Super Admin function"""
+        if len(new_password) < 8:
+            return False, "Password must be at least 8 characters long"
+        
+        with self.lock:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                new_password_hash = self._hash_password(new_password)
+                cursor.execute("""
+                    UPDATE users SET 
+                        password_hash = ?, 
+                        password_changed = FALSE,
+                        password_change_date = ?
+                    WHERE username = ?
+                """, (new_password_hash, datetime.now().isoformat(), username))
+                
+                if cursor.rowcount == 0:
+                    return False, "User not found"
+                
+                conn.commit()
+                return True, f"Password reset for user '{username}'"
+    
+    def get_database_stats(self) -> Dict:
+        """Get database statistics - Super Admin function"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            # User statistics
+            cursor.execute("SELECT COUNT(*) FROM users")
+            total_users = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM users WHERE is_active = 1")
+            active_users = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+            admin_users = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM users WHERE last_login IS NOT NULL")
+            users_with_login = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM users WHERE password_changed = 1")
+            users_changed_password = cursor.fetchone()[0]
+            
+            # Registration requests
+            cursor.execute("SELECT COUNT(*) FROM registration_requests WHERE status = 'pending'")
+            pending_requests = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM registration_requests")
+            total_requests = cursor.fetchone()[0]
+            
+            return {
+                'total_users': total_users,
+                'active_users': active_users,
+                'inactive_users': total_users - active_users,
+                'admin_users': admin_users,
+                'regular_users': total_users - admin_users,
+                'users_with_login': users_with_login,
+                'users_never_logged_in': total_users - users_with_login,
+                'users_changed_password': users_changed_password,
+                'users_default_password': total_users - users_changed_password,
+                'pending_registration_requests': pending_requests,
+                'total_registration_requests': total_requests
+            }
+    
+    def execute_raw_query(self, query: str, params: tuple = ()) -> Tuple[bool, str, List]:
+        """Execute raw SQL query - Super Admin function (USE WITH CAUTION)"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute(query, params)
+                
+                if query.strip().upper().startswith('SELECT'):
+                    results = [dict(row) for row in cursor.fetchall()]
+                    return True, "Query executed successfully", results
+                else:
+                    conn.commit()
+                    return True, f"Query executed successfully. Rows affected: {cursor.rowcount}", []
+        except Exception as e:
+            return False, f"Query failed: {str(e)}", []
 
 # Initialize the database
 auth_db = UserAuthDB()
@@ -526,7 +642,12 @@ def show_user_profile_page():
         st.markdown("---")
         st.subheader("🔧 Admin Panel")
         
-        admin_tab1, admin_tab2, admin_tab3 = st.tabs(["Users", "Registration Requests", "Create User"])
+        if auth_db.is_super_admin(current_user):
+            admin_tab1, admin_tab2, admin_tab3, admin_tab4, admin_tab5 = st.tabs([
+                "Users", "Registration Requests", "Create User", "Super Admin", "Database"
+            ])
+        else:
+            admin_tab1, admin_tab2, admin_tab3 = st.tabs(["Users", "Registration Requests", "Create User"])
         
         with admin_tab1:
             st.write("**All Users:**")
@@ -609,6 +730,129 @@ def show_user_profile_page():
                             st.error(message)
                     else:
                         st.error("Username and password are required")
+        
+        # Super Admin Panel (only for saldenisov)
+        if auth_db.is_super_admin(current_user):
+            with admin_tab4:
+                st.write("**🔥 Super Admin Controls (saldenisov only):**")
+                st.warning("⚠️ These functions can modify user roles and passwords. Use with caution.")
+                
+                # Role Management
+                st.subheader("Role Management")
+                users = auth_db.get_all_users()
+                for user in users:
+                    if user['username'] != 'saldenisov':  # Can't modify super admin
+                        with st.expander(f"Manage {user['username']} ({user['role']})"):
+                            col_promote, col_demote, col_reset = st.columns(3)
+                            
+                            with col_promote:
+                                if st.button(f"Promote to Admin", key=f"promote_{user['id']}", disabled=user['role']=='admin'):
+                                    success, msg = auth_db.promote_to_admin(user['username'])
+                                    if success:
+                                        st.success(msg)
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
+                            
+                            with col_demote:
+                                if st.button(f"Demote to User", key=f"demote_{user['id']}", disabled=user['role']=='user'):
+                                    success, msg = auth_db.demote_from_admin(user['username'])
+                                    if success:
+                                        st.success(msg)
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
+                            
+                            with col_reset:
+                                with st.form(f"reset_password_{user['id']}"):
+                                    new_pwd = st.text_input("New Password", type="password", key=f"newpwd_{user['id']}")
+                                    if st.form_submit_button("Reset Password"):
+                                        if new_pwd:
+                                            success, msg = auth_db.reset_user_password(user['username'], new_pwd)
+                                            if success:
+                                                st.success(msg)
+                                                st.rerun()
+                                            else:
+                                                st.error(msg)
+                                        else:
+                                            st.error("Please enter a new password")
+            
+            with admin_tab5:
+                st.write("**📊 Database Management:**")
+                
+                # Database Statistics
+                st.subheader("Database Statistics")
+                stats = auth_db.get_database_stats()
+                
+                col_stats1, col_stats2 = st.columns(2)
+                with col_stats1:
+                    st.metric("Total Users", stats['total_users'])
+                    st.metric("Active Users", stats['active_users'])
+                    st.metric("Admin Users", stats['admin_users'])
+                    st.metric("Users with Login", stats['users_with_login'])
+                
+                with col_stats2:
+                    st.metric("Inactive Users", stats['inactive_users'])
+                    st.metric("Regular Users", stats['regular_users'])
+                    st.metric("Changed Passwords", stats['users_changed_password'])
+                    st.metric("Pending Requests", stats['pending_registration_requests'])
+                
+                # Raw SQL Query Interface
+                st.markdown("---")
+                st.subheader("🔧 Raw SQL Query Interface")
+                st.warning("⚠️ DANGER ZONE: Direct database access. Use only if you know SQL!")
+                
+                with st.form("sql_query_form"):
+                    sql_query = st.text_area(
+                        "SQL Query:", 
+                        placeholder="SELECT * FROM users;",
+                        height=100
+                    )
+                    
+                    col_execute, col_examples = st.columns([1, 2])
+                    with col_execute:
+                        execute_query = st.form_submit_button("Execute Query")
+                    
+                    with col_examples:
+                        st.write("**Common queries:**")
+                        st.code("SELECT * FROM users;")
+                        st.code("SELECT username, role, is_active FROM users;")
+                        st.code("SELECT * FROM registration_requests;")
+                    
+                    if execute_query and sql_query.strip():
+                        success, message, results = auth_db.execute_raw_query(sql_query.strip())
+                        
+                        if success:
+                            st.success(message)
+                            if results:
+                                st.dataframe(results)
+                            else:
+                                st.info("Query executed successfully (no results to display)")
+                        else:
+                            st.error(message)
+                
+                # Database File Info
+                st.markdown("---")
+                st.subheader("📁 Database File Information")
+                db_path = auth_db.db_path
+                if db_path.exists():
+                    stat = db_path.stat()
+                    st.write(f"**Database Path:** `{db_path}`")
+                    st.write(f"**File Size:** {stat.st_size} bytes ({stat.st_size/1024:.1f} KB)")
+                    st.write(f"**Last Modified:** {datetime.fromtimestamp(stat.st_mtime)}")
+                else:
+                    st.error("Database file not found!")
+                
+                # Railway Console Access Instructions
+                st.markdown("---")
+                st.subheader("🚂 Railway Console Access")
+                st.info(
+                    "To access the database directly on Railway:\n\n"
+                    "1. Go to your Railway dashboard\n"
+                    "2. Open your service → Settings → Console\n"
+                    "3. Run: `sqlite3 users.db`\n"
+                    "4. Use SQL commands like `.tables`, `.schema users`, `SELECT * FROM users;`"
+                )
     
     # Logout button
     st.markdown("---")
