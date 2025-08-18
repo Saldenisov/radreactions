@@ -8,6 +8,7 @@ from config import AVAILABLE_TABLES, get_table_paths, BASE_DIR
 from db_utils import load_db, get_stats_for_table, aggregate_stats
 from tsv_utils import tsv_to_visible, visible_to_tsv, correct_tsv_file
 from pdf_utils import tsv_to_full_latex_article, compile_tex_to_pdf
+from auth import check_authentication, show_login_page, show_user_profile_page, require_authentication
 
 # Try import fitz (PyMuPDF)
 try:
@@ -18,8 +19,28 @@ except ImportError:
 
 st.set_page_config(layout="wide")
 
+# === Authentication Check ===
+current_user = check_authentication()
+if not current_user:
+    show_login_page()
+    st.stop()
+
 # === Sidebar controls and global stats ===
 st.sidebar.title('Controls')
+
+# === User Information ===
+st.sidebar.markdown(f"### 👤 Logged in as: **{current_user}**")
+if st.sidebar.button("👤 My Profile"):
+    st.session_state.show_profile = True
+    st.rerun()
+
+# Check if we should show profile page
+if st.session_state.get('show_profile', False):
+    st.session_state.show_profile = False
+    show_user_profile_page()
+    st.stop()
+
+st.sidebar.markdown("---")
 table_choice = st.sidebar.selectbox(
     "Select Table Folder:",
     options=AVAILABLE_TABLES,
