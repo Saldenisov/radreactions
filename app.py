@@ -23,7 +23,7 @@ if st.session_state.get('page_mode') == 'validate':
         st.rerun()
     
     # Show validation interface
-    from pages.validate_embedded import show_validation_interface
+    from validate_embedded import show_validation_interface
     show_validation_interface(current_user)
     st.stop()  # Don't show main page content
 

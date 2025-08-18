@@ -180,7 +180,15 @@ user_manager = UserManager()
 
 def check_authentication() -> Optional[str]:
     """Check if user is authenticated"""
-    return st.session_state.get('authenticated_user', None)
+    # Console debug statements
+    print(f"[AUTH DEBUG] check_authentication() called")
+    print(f"[AUTH DEBUG] Session state keys: {list(st.session_state.keys())}")
+    print(f"[AUTH DEBUG] authenticated_user: {st.session_state.get('authenticated_user', 'NOT_SET')}")
+    print(f"[AUTH DEBUG] authentication_status: {st.session_state.get('authentication_status', 'NOT_SET')}")
+    
+    result = st.session_state.get('authenticated_user', None)
+    print(f"[AUTH DEBUG] check_authentication() returning: {result}")
+    return result
 
 def login_user(username: str):
     """Log in user and set session state"""
