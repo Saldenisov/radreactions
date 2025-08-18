@@ -6,6 +6,7 @@ __pycache__/
 
 # Virtual environments
 venv/
+.venv/
 ENV/
 env/
 
@@ -34,3 +35,12 @@ data-sample/
 
 # Environment variables
 .env
+
+# Authentication and user data (SECURITY CRITICAL)
+users.json
+registration_requests.json
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
