@@ -127,12 +127,14 @@ with col2:
 
 st.markdown("---")
 
+
 # === BROWSE + SEARCH TABS ===
-browse_tab, search_tab = st.tabs(["📚 Browse Reactions", "🔎 Search Reactions"]) 
+browse_tab, validated_tab, search_tab = st.tabs(["📚 Browse Reactions", "✅ Validated", "🔎 Search Reactions"]) 
+
+from reactions_db import ensure_db, list_reactions, get_reaction_with_measurements, get_validation_meta_by_source
+con = ensure_db()
 
 with browse_tab:
-    from reactions_db import ensure_db, list_reactions, get_reaction_with_measurements
-    con = ensure_db()
     left, right = st.columns([1.2, 2])
     with left:
         name_filter = st.text_input("Filter by name/formula", placeholder="type to filter...")
@@ -140,8 +142,7 @@ with browse_tab:
         if not rows:
             st.info("No reactions in database yet. Import data to populate.")
         else:
-            # Selection list
-            labels = [f"{(r['reaction_name'] or '')} | {r['formula_canonical']}".strip() for r in rows]
+            labels = [f"{(r['reaction_name'] or '')} | {r['formula_canonical']}".strip(" |") for r in rows]
             sel = st.selectbox("A→Z reactions", options=list(range(len(rows))), format_func=lambda i: labels[i])
             st.session_state.selected_reaction_id = rows[sel]['id']
     with right:
@@ -151,12 +152,71 @@ with browse_tab:
             r = data.get('reaction')
             ms = data.get('measurements', [])
             if r:
-                st.subheader(r.get('reaction_name') or r['formula_canonical'])
+                st.subheader(r['reaction_name'] or r['formula_canonical'])
                 st.markdown(f"**Table:** {r['table_no']} ({r['table_category']})")
                 st.latex(r['formula_latex'])
                 st.code(f"Reactants: {r['reactants']}\nProducts: {r['products']}")
                 if r['notes']:
                     st.markdown(f"**Notes:** {r['notes']}")
+                # Validator metadata from DB
+                try:
+                    src = r['source_path'] or ''
+                    if src:
+                        meta = get_validation_meta_by_source(con, src)
+                        if meta.get('validated'):
+                            who = meta.get('by') or 'unknown'
+                            when = meta.get('at') or 'unknown time'
+                            st.markdown(f"**Validated by:** {who}  ")
+                            st.markdown(f"**Validated at:** {when}")
+                except Exception:
+                    pass
+                st.markdown("### Measurements")
+                if not ms:
+                    st.info("No measurements recorded")
+                else:
+                    for m in ms:
+                        ref_label = m['doi'] and f"DOI: https://doi.org/{m['doi']}" or (m['citation_text'] or m['buxton_code'] or "")
+                        st.markdown(f"- pH: {m['pH'] or '-'}; rate: {m['rate_value'] or '-'}; method: {m['method'] or '-'}")
+                        if ref_label:
+                            st.markdown(f"  ↳ Reference: {ref_label}")
+
+with validated_tab:
+    st.info("Showing only reactions marked as validated.")
+    v_left, v_right = st.columns([1.2, 2])
+    with v_left:
+        v_filter = st.text_input("Filter validated by name/formula", key="validated_filter", placeholder="type to filter...")
+        v_rows = list_reactions(con, name_filter=v_filter or None, limit=2000, validated_only=True)
+        if not v_rows:
+            st.info("No validated reactions yet.")
+        else:
+            v_labels = [f"{(r['reaction_name'] or '')} | {r['formula_canonical']}".strip(" |") for r in v_rows]
+            v_sel = st.selectbox("Validated A→Z", options=list(range(len(v_rows))), format_func=lambda i: v_labels[i], key="validated_select")
+            st.session_state.validated_selected_reaction_id = v_rows[v_sel]['id']
+    with v_right:
+        vrid = st.session_state.get('validated_selected_reaction_id')
+        if vrid:
+            vdata = get_reaction_with_measurements(con, vrid)
+            r = vdata.get('reaction')
+            ms = vdata.get('measurements', [])
+            if r:
+                st.subheader(r['reaction_name'] or r['formula_canonical'])
+                st.markdown(f"**Table:** {r['table_no']} ({r['table_category']})")
+                st.latex(r['formula_latex'])
+                st.code(f"Reactants: {r['reactants']}\nProducts: {r['products']}")
+                if r['notes']:
+                    st.markdown(f"**Notes:** {r['notes']}")
+                # Validator metadata from DB
+                try:
+                    src = r['source_path'] or ''
+                    if src:
+                        meta = get_validation_meta_by_source(con, src)
+                        if meta.get('validated'):
+                            who = meta.get('by') or 'unknown'
+                            when = meta.get('at') or 'unknown time'
+                            st.markdown(f"**Validated by:** {who}  ")
+                            st.markdown(f"**Validated at:** {when}")
+                except Exception:
+                    pass
                 st.markdown("### Measurements")
                 if not ms:
                     st.info("No measurements recorded")
@@ -177,8 +237,7 @@ with search_tab:
     with st.expander("🔧 Advanced Search Options"):
         table_filter = st.selectbox("Table (category)", options=["All", 5,6,7,8,9], key='table_filter', format_func=lambda x: {"All":"All",5:"Table5 (water radiolysis)",6:"Table6 (e_aq^-) ",7:"Table7 (H•)",8:"Table8 (OH•)",9:"Table9 (O•−)"}[x] if x!="All" else "All")
     if query:
-        from reactions_db import ensure_db, search_reactions, count_reactions
-        con = ensure_db()
+        from reactions_db import search_reactions
         table_no = None if table_filter == "All" else int(table_filter)
         try:
             rows = search_reactions(con, query, table_no=table_no, limit=int(max_hits))

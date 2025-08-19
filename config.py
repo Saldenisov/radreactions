@@ -6,14 +6,20 @@ AVAILABLE_TABLES = ['table5', 'table6', 'table7', 'table8', 'table9']
 # Determine BASE_DIR robustly across environments (Railway Docker, local Windows)
 # Priority:
 # 1) Explicit BASE_DIR env var if provided
-# 2) Common container paths (/app/data preferred, then /data)
-# 3) Local Windows development path
+# 2) Local repo data folder (data-full next to this file)
+# 3) Common container paths (/app/data preferred, then /data)
+# 4) Local Windows development path
 _env_base = os.getenv('BASE_DIR')
 if _env_base:
-    # If env var provided but path doesn't exist, fall back to common candidates
     _env_path = Path(_env_base)
     if _env_path.exists():
         BASE_DIR = _env_path
+    else:
+        BASE_DIR = Path(__file__).parent / 'data-full'
+else:
+    local_data = Path(__file__).parent / 'data-full'
+    if local_data.exists():
+        BASE_DIR = local_data
     else:
         candidates = [Path('/app/data'), Path('/data'), Path(r"E:\\ICP_notebooks\\Buxton")]
         for _p in candidates:
@@ -21,16 +27,8 @@ if _env_base:
                 BASE_DIR = _p
                 break
         else:
-            BASE_DIR = Path('/app/data')
-else:
-    candidates = [Path('/app/data'), Path('/data'), Path(r"E:\\ICP_notebooks\\Buxton")]
-    for _p in candidates:
-        if _p.exists():
-            BASE_DIR = _p
-            break
-    else:
-        # Default to /app/data if nothing exists; will work in container image with baked data
-        BASE_DIR = Path('/app/data')
+            # Default to local data-full (created later) to keep paths consistent
+            BASE_DIR = local_data
 
 def get_table_paths(table_choice):
     image_dir = BASE_DIR / table_choice / "sub_tables_images"

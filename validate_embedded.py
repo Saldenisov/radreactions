@@ -4,7 +4,6 @@ from pathlib import Path
 import json
 from datetime import datetime
 from config import AVAILABLE_TABLES, get_table_paths, BASE_DIR
-from db_utils import load_db, get_stats_for_table, aggregate_stats
 from tsv_utils import tsv_to_visible, visible_to_tsv, correct_tsv_file
 from pdf_utils import tsv_to_full_latex_article, compile_tex_to_pdf
 from auth_db import show_user_profile_page
@@ -56,7 +55,30 @@ def show_validation_interface(current_user):
         index=AVAILABLE_TABLES.index('table6') if 'table6' in AVAILABLE_TABLES else 0,
     )
 
-    agg_total, agg_validated, agg_percent = aggregate_stats(AVAILABLE_TABLES, get_table_paths)
+    # Compute global stats from DB across all tables
+    def table_images(table_name):
+        img_dir, _, tsv_dir, _ = get_table_paths(table_name)
+        imgs = sorted([p.name for p in img_dir.glob('*.png')])
+        return imgs, tsv_dir
+
+    from reactions_db import ensure_db, get_validation_meta_by_source
+    con = ensure_db()
+    agg_total = 0
+    agg_validated = 0
+    for t in AVAILABLE_TABLES:
+        imgs, tsv_dir = table_images(t)
+        agg_total += len(imgs)
+        for img in imgs:
+            stem = Path(img).stem
+            src_csv = tsv_dir / f"{stem}.csv"
+            src_tsv = tsv_dir / f"{stem}.tsv"
+            source_file = str(src_csv if src_csv.exists() else src_tsv) if (src_csv.exists() or src_tsv.exists()) else None
+            if source_file:
+                meta = get_validation_meta_by_source(con, source_file)
+                if meta.get('validated'):
+                    agg_validated += 1
+    agg_percent = (100*agg_validated/agg_total) if agg_total else 0.0
+
     st.sidebar.markdown("### **All Tables (Global Stats)**")
     st.sidebar.markdown(f"**Total images:** {agg_total}")
     st.sidebar.markdown(f"**Validated:** {agg_validated} ({agg_percent:.1f}%)")
@@ -69,9 +91,24 @@ def show_validation_interface(current_user):
     st.sidebar.markdown(f"IMAGE_DIR exists: {IMAGE_DIR.exists()}")
     st.sidebar.markdown(f"IMAGE_DIR: {IMAGE_DIR}")
 
-    db = load_db(DB_PATH, IMAGE_DIR)
+    # Determine images directly from directory; compute stats from DB
+    images_all = sorted([p.name for p in IMAGE_DIR.glob('*.png')])
 
-    table_total, table_validated, table_percent = get_stats_for_table(db)
+    from reactions_db import get_validation_meta_by_source
+    con = ensure_db()
+    def image_meta(name: str):
+        stem = Path(name).stem
+        src_csv = TSV_DIR / f"{stem}.csv"
+        src_tsv = TSV_DIR / f"{stem}.tsv"
+        source_file = str(src_csv if src_csv.exists() else src_tsv) if (src_csv.exists() or src_tsv.exists()) else None
+        if not source_file:
+            return {"validated": False, "by": None, "at": None}
+        return get_validation_meta_by_source(con, source_file)
+
+    table_total = len(images_all)
+    table_validated = sum(1 for img in images_all if image_meta(img).get('validated'))
+    table_percent = (100*table_validated/table_total) if table_total else 0.0
+
     st.sidebar.markdown(f"### **Selected Table: {table_choice}**")
     st.sidebar.markdown(f"**Total images:** {table_total}")
     st.sidebar.markdown(f"**Validated:** {table_validated} ({table_percent:.1f}%)")
@@ -83,9 +120,9 @@ def show_validation_interface(current_user):
     )
 
     if filter_mode == "Only unvalidated":
-        images = [img for img, valid in db.items() if not valid]
+        images = [img for img in images_all if not image_meta(img).get('validated')]
     else:
-        images = list(db.keys())
+        images = images_all
 
     if not images:
         st.sidebar.warning("No images to display for this filter.")
@@ -110,36 +147,85 @@ def show_validation_interface(current_user):
     current_image = images[st.session_state.idx]
     st.sidebar.markdown(f'**Current:** {current_image}')
 
-    # === Validation toggle ===
+    # === Validation toggle (DB is the source of truth) ===
+    # Read current status from DB metadata derived from any existing TSV/CSV source
+    stem = Path(current_image).stem
+    csv_candidate = TSV_DIR / f"{stem}.csv"
+    tsv_candidate = TSV_DIR / f"{stem}.tsv"
+    source_file = str(csv_candidate if csv_candidate.exists() else tsv_candidate) if (csv_candidate.exists() or tsv_candidate.exists()) else None
+
+    db_meta_checked = False
+    if source_file:
+        try:
+            from reactions_db import ensure_db, get_validation_meta_by_source
+            con = ensure_db()
+            meta = get_validation_meta_by_source(con, source_file)
+            db_meta_checked = bool(meta.get('validated', False))
+        except Exception:
+            db_meta_checked = False
+
     validated = st.sidebar.checkbox(
         'Validated',
-        value=db.get(current_image, False),
+        value=db_meta_checked,
         key=f'validated_{table_choice}_{current_image}'
     )
-    if validated != db.get(current_image, False):
-        db[current_image] = validated
-        DB_PATH.write_text(json.dumps(db, indent=2, ensure_ascii=False))
+
+    if validated != db_meta_checked:
+        # Ensure reactions for this source are present; if not, import
+        try:
+            from reactions_db import ensure_db, set_validated_by_source
+            con = ensure_db()
+            if not source_file:
+                # Prefer to create a TSV path so we can track source
+                source_candidate = TSV_DIR / f"{stem}.tsv"
+                source_candidate.parent.mkdir(parents=True, exist_ok=True)
+                source_file = str(source_candidate)
+                if not source_candidate.exists():
+                    source_candidate.write_text('', encoding='utf-8')
+            # If there are no reactions yet for this source, import them now (if csv/tsv has content)
+            try:
+                exists = con.execute("SELECT 1 FROM reactions WHERE source_path = ? LIMIT 1", (source_file,)).fetchone()
+            except Exception:
+                exists = None
+            if not exists:
+                try:
+                    from import_reactions import import_single_csv
+                    tno = int(table_choice.replace('table','')) if table_choice.startswith('table') else None
+                    if tno and Path(source_file).exists():
+                        rcount, mcount = import_single_csv(Path(source_file), tno)
+                        st.sidebar.info(f"Imported {rcount} reactions from source before syncing validation.")
+                except Exception as e:
+                    st.sidebar.warning(f"Auto-import failed: {e}")
+            # Update DB validation state with metadata
+            updated = set_validated_by_source(con, source_file, validated, by=current_user if validated else None, at_iso=datetime.now().isoformat() if validated else None)
+            if updated == 0 and exists:
+                st.sidebar.info("No reactions were updated (already in desired state).")
+        except Exception as e:
+            st.sidebar.warning(f"Validation sync failed: {e}")
 
     # === Download Section ===
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### **📥 Download Validation Data**")
+    st.sidebar.markdown("### **📥 Export Validation JSON (from DB)**")
 
-    # Download current table validation DB
-    if st.sidebar.button(f"Download {table_choice} DB"):
-        # Prepare the validation database for download
+    # Export current table validation map derived from DB
+    if st.sidebar.button(f"Export {table_choice} validation JSON"):
+        validation_map = {}
+        for img in images_all:
+            meta = image_meta(img)
+            validation_map[img] = {
+                "validated": bool(meta.get('validated')),
+                "by": meta.get('by'),
+                "at": meta.get('at'),
+            }
         download_data = {
             "table_name": table_choice,
             "export_timestamp": datetime.now().isoformat(),
             "total_images": table_total,
             "validated_images": table_validated,
             "validation_percentage": table_percent,
-            "validation_data": db
+            "validation_data": validation_map,
         }
-        
-        # Create JSON string
         json_str = json.dumps(download_data, indent=2, ensure_ascii=False)
-        
-        # Create download button
         st.sidebar.download_button(
             label=f"💾 {table_choice}_validation_db.json",
             data=json_str,
@@ -148,35 +234,38 @@ def show_validation_interface(current_user):
             key=f"download_{table_choice}"
         )
 
-    # Download all tables validation data
-    if st.sidebar.button("Download All Tables DBs"):
+    # Export all tables validation data from DB
+    if st.sidebar.button("Export all tables validation JSON"):
         all_tables_data = {
             "export_timestamp": datetime.now().isoformat(),
             "global_stats": {
                 "total_images": agg_total,
                 "validated_images": agg_validated,
-                "validation_percentage": agg_percent
+                "validation_percentage": agg_percent,
             },
-            "tables": {}
+            "tables": {},
         }
-        
         for table in AVAILABLE_TABLES:
-            try:
-                _, _, _, table_db_path = get_table_paths(table)
-                if table_db_path.exists():
-                    table_db = load_db(table_db_path, get_table_paths(table)[0])
-                    table_stats = get_stats_for_table(table_db)
-                    
-                    all_tables_data["tables"][table] = {
-                        "total_images": table_stats[0],
-                        "validated_images": table_stats[1],
-                        "validation_percentage": table_stats[2],
-                        "validation_data": table_db
-                    }
-            except Exception as e:
-                st.sidebar.error(f"Error loading {table}: {str(e)}")
-        
-        # Create download button for all tables
+            img_dir, _, tsv_dir, _ = get_table_paths(table)
+            imgs = sorted([p.name for p in img_dir.glob('*.png')])
+            t_total = len(imgs)
+            val_map = {}
+            t_valid = 0
+            for img in imgs:
+                stem = Path(img).stem
+                src_csv = tsv_dir / f"{stem}.csv"
+                src_tsv = tsv_dir / f"{stem}.tsv"
+                source_file = str(src_csv if src_csv.exists() else src_tsv) if (src_csv.exists() or src_tsv.exists()) else None
+                meta = get_validation_meta_by_source(con, source_file) if source_file else {"validated": False, "by": None, "at": None}
+                val_map[img] = {"validated": bool(meta.get('validated')), "by": meta.get('by'), "at": meta.get('at')}
+                if val_map[img]['validated']:
+                    t_valid += 1
+            all_tables_data['tables'][table] = {
+                "total_images": t_total,
+                "validated_images": t_valid,
+                "validation_percentage": (100*t_valid/t_total) if t_total else 0.0,
+                "validation_data": val_map,
+            }
         json_str = json.dumps(all_tables_data, indent=2, ensure_ascii=False)
         st.sidebar.download_button(
             label="💾 all_tables_validation_data.json",

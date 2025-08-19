@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS reactions (
   product_species TEXT,
   notes TEXT,
   validated INTEGER NOT NULL DEFAULT 0,
+  validated_by TEXT,
+  validated_at TEXT,
   source_path TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -117,6 +119,23 @@ def ensure_db(db_path: Path = DB_PATH) -> sqlite3.Connection:
         con.executescript(SCHEMA_SQL)
         con.execute("INSERT INTO schema_migrations(name) VALUES (?)", (MIGRATION_NAME_INIT,))
         con.commit()
+    # Lightweight migration: ensure validated_by and validated_at columns exist
+    try:
+        cols = {row[1] for row in con.execute("PRAGMA table_info(reactions)").fetchall()}
+        to_add = []
+        if "validated_by" not in cols:
+            to_add.append("ALTER TABLE reactions ADD COLUMN validated_by TEXT")
+        if "validated_at" not in cols:
+            to_add.append("ALTER TABLE reactions ADD COLUMN validated_at TEXT")
+        for stmt in to_add:
+            try:
+                con.execute(stmt)
+            except Exception:
+                pass
+        if to_add:
+            con.commit()
+    except Exception:
+        pass
     return con
 
 # ---------------- Canonicalization -----------------
@@ -284,19 +303,62 @@ def count_reactions(con: sqlite3.Connection) -> int:
     return int(row[0]) if row else 0
 
 
-def list_reactions(con: sqlite3.Connection, *, name_filter: Optional[str] = None, limit: int = 1000) -> List[sqlite3.Row]:
-    """List reactions ordered A->Z by name (fallback to canonical)."""
-    if name_filter:
-        like = f"%{name_filter.lower()}%"
-        sql = (
-            "SELECT * FROM reactions WHERE lower(COALESCE(reaction_name, formula_canonical)) LIKE ? "
-            "ORDER BY lower(COALESCE(reaction_name, formula_canonical)) ASC LIMIT ?"
+def set_validated_by_source(con: sqlite3.Connection, source_path: str, validated: bool, *, by: Optional[str] = None, at_iso: Optional[str] = None) -> int:
+    """Set validated flag and metadata for all reactions from a given source path.
+
+    If validated is True, set validated_by and validated_at; if False, clear them.
+    Returns number of rows updated.
+    """
+    if validated:
+        cur = con.execute(
+            "UPDATE reactions SET validated = 1, validated_by = ?, validated_at = ?, updated_at = datetime('now') WHERE source_path = ?",
+            (by, at_iso, source_path),
         )
-        return con.execute(sql, (like, limit)).fetchall()
+    else:
+        cur = con.execute(
+            "UPDATE reactions SET validated = 0, validated_by = NULL, validated_at = NULL, updated_at = datetime('now') WHERE source_path = ?",
+            (source_path,),
+        )
+    con.commit()
+    return cur.rowcount
+
+
+def list_reactions(
+    con: sqlite3.Connection,
+    *,
+    name_filter: Optional[str] = None,
+    limit: int = 1000,
+    validated_only: Optional[bool] = None,
+) -> List[sqlite3.Row]:
+    """List reactions ordered A->Z by name (fallback to canonical).
+
+    Args:
+        con: sqlite connection
+        name_filter: optional case-insensitive filter on name or canonical formula
+        limit: max rows
+        validated_only: if True, only validated=1; if False, only validated=0; if None, no filter
+    """
+    where = []
+    params: list[Any] = []  # type: ignore[name-defined]
+
+    if name_filter:
+        where.append("lower(COALESCE(reaction_name, formula_canonical)) LIKE ?")
+        params.append(f"%{name_filter.lower()}%")
+
+    if validated_only is True:
+        where.append("validated = 1")
+    elif validated_only is False:
+        where.append("validated = 0")
+
+    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+
     sql = (
-        "SELECT * FROM reactions ORDER BY lower(COALESCE(reaction_name, formula_canonical)) ASC LIMIT ?"
+        "SELECT * FROM reactions"
+        + where_sql
+        + " ORDER BY lower(COALESCE(reaction_name, formula_canonical)) ASC LIMIT ?"
     )
-    return con.execute(sql, (limit,)).fetchall()
+    params.append(limit)
+    return con.execute(sql, tuple(params)).fetchall()
 
 
 def get_reaction_with_measurements(con: sqlite3.Connection, reaction_id: int) -> Dict[str, Any]:
@@ -314,4 +376,19 @@ def get_reaction_with_measurements(con: sqlite3.Connection, reaction_id: int) ->
         (reaction_id,)
     ).fetchall()
     return {"reaction": r, "measurements": ms}
+
+
+def get_validation_meta_by_source(con: sqlite3.Connection, source_path: str) -> Dict[str, Any]:
+    """Return {'validated': bool, 'by': str|None, 'at': str|None} for a given source path.
+
+    If multiple rows exist for the same source, prefer any row with validated=1,
+    otherwise return the first row's metadata (likely None).
+    """
+    row = con.execute(
+        "SELECT validated, validated_by, validated_at FROM reactions WHERE source_path = ? ORDER BY validated DESC LIMIT 1",
+        (source_path,)
+    ).fetchone()
+    if not row:
+        return {"validated": False, "by": None, "at": None}
+    return {"validated": bool(row[0]), "by": row[1], "at": row[2]}
 

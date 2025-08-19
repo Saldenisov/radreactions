@@ -1,27 +1,127 @@
 {
-  "JournalPage_532_20_reaction_1.png": false,
-  "JournalPage_532_20_reaction_2.png": false,
-  "JournalPage_532_20_reaction_3.png": false,
-  "JournalPage_533_21_reaction_10.png": false,
-  "JournalPage_533_21_reaction_3.png": false,
-  "JournalPage_533_21_reaction_4.png": false,
-  "JournalPage_533_21_reaction_5.png": false,
-  "JournalPage_533_21_reaction_6.png": false,
-  "JournalPage_533_21_reaction_7.png": false,
-  "JournalPage_533_21_reaction_8.png": false,
-  "JournalPage_533_21_reaction_9.png": false,
-  "JournalPage_534_22_reaction_10.png": false,
-  "JournalPage_534_22_reaction_11.png": false,
-  "JournalPage_534_22_reaction_12.png": false,
-  "JournalPage_534_22_reaction_13.png": false,
-  "JournalPage_534_22_reaction_14.png": false,
-  "JournalPage_534_22_reaction_15.png": false,
-  "JournalPage_534_22_reaction_16.png": false,
-  "JournalPage_534_22_reaction_17.png": false,
-  "JournalPage_534_22_reaction_18.png": false,
-  "JournalPage_535_23_reaction_19.png": false,
-  "JournalPage_535_23_reaction_20.png": false,
-  "JournalPage_535_23_reaction_21.png": false,
-  "JournalPage_535_23_reaction_22.png": false,
-  "JournalPage_535_23_reaction_23.png": false
+  "JournalPage_532_20_reaction_1.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_532_20_reaction_2.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_532_20_reaction_3.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_533_21_reaction_10.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_533_21_reaction_3.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_533_21_reaction_4.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_533_21_reaction_5.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_533_21_reaction_6.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_533_21_reaction_7.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_533_21_reaction_8.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_533_21_reaction_9.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_534_22_reaction_10.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_534_22_reaction_11.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_534_22_reaction_12.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_534_22_reaction_13.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_534_22_reaction_14.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_534_22_reaction_15.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_534_22_reaction_16.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_534_22_reaction_17.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_534_22_reaction_18.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_535_23_reaction_19.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_535_23_reaction_20.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_535_23_reaction_21.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_535_23_reaction_22.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  },
+  "JournalPage_535_23_reaction_23.png": {
+    "validated": false,
+    "by": null,
+    "at": null
+  }
 }
