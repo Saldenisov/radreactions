@@ -17,7 +17,8 @@ if _env_base:
     else:
         BASE_DIR = Path(__file__).parent / 'data-full'
 else:
-    local_data = Path(__file__).parent / 'data-full'
+    # After repo restructuring, data-full lives at the project root, one level above this file
+    local_data = Path(__file__).parent.parent / 'data-full'
     if local_data.exists():
         BASE_DIR = local_data
     else:

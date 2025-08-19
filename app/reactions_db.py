@@ -4,16 +4,16 @@ import re
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any
 
-from config import BASE_DIR
+from app.config import BASE_DIR
 
 DB_PATH = Path("reactions.db")
 
 TABLE_CATEGORY = {
-    5: "water radiolysis radicals",
-    6: "solvated electron",
-    7: "hydrogen atom (H•)",
-    8: "hydroxyl radical (OH•)",
-    9: "oxide/superoxide (O•−)",
+    5: "Rate constants for radical-radical reactions",
+    6: "Rate constants for reactions of hydrated electrons in aqueous solution",
+    7: "Rate constants for reactions of hydrogen atoms in aqueous solution",
+    8: "Rate constants for reactions of hydroxyl radicals in aqueous solution",
+    9: "Rate constants for reactions of the oxide radical ion in aqueous solution",
 }
 
 def connect(db_path: Path = DB_PATH) -> sqlite3.Connection:
@@ -107,7 +107,6 @@ COMMIT;
 """
 
 MIGRATION_NAME_INIT = "001_init"
-
 def ensure_db(db_path: Path = DB_PATH) -> sqlite3.Connection:
     con = connect(db_path)
     # check migration applied
@@ -136,6 +135,13 @@ def ensure_db(db_path: Path = DB_PATH) -> sqlite3.Connection:
             con.commit()
     except Exception:
         pass
+    # Migration: update table_category strings per TABLE_CATEGORY mapping
+    try:
+        for tno, cat in TABLE_CATEGORY.items():
+            con.execute("UPDATE reactions SET table_category = ? WHERE table_no = ?", (cat, tno))
+        con.commit()
+    except Exception:
+        pass
     return con
 
 # ---------------- Canonicalization -----------------
@@ -143,8 +149,8 @@ def ensure_db(db_path: Path = DB_PATH) -> sqlite3.Connection:
 _math_delims = [(r"$", r"$"), (r"\(", r"\)"), (r"\[", r"\]")]
 
 _ce_re = re.compile(r"\\ce\{(.+?)\}")
-_sup_re = re.compile(r"\^\{([^}]+)\}|\^([A-Za-z0-9+\-]+)")
-_sub_re = re.compile(r"_\{([^}]+)\}|_([A-Za-z0-9+\-]+)")
+_sup_re = re.compile(r"\^\{([^}]+)\}|\^([A-Za-z0-9+\-\.•]+)")
+_sub_re = re.compile(r"_\{([^}]+)\}|_([A-Za-z0-9+\-\.]+)")
 _spaces_re = re.compile(r"\s+")
 
 radical_map = {
@@ -187,13 +193,19 @@ def latex_to_canonical(formula_latex: str) -> Tuple[str, str, str, List[str], Li
     if m:
         core = m.group(1)
     # normalize arrows
-    core = re.sub(r"\\rightarrow|\\to|\-\>", "->", core)
+    core = re.sub(r"\\rightarrow|\\to|\-\\>", "->", core)
+    # Fix common malformed braces for radical dot: turn '^{.' (missing closing) into '^{.}'
+    core = re.sub(r"\^\{\.(?!\})", "^{.}", core)
+    # Within an already braced superscript, drop inner '^.' to avoid nested braces like '^{2-^{.}}' -> '^{2-.}'
+    core = re.sub(r"(\^\{[^}]*?)\^\.?", r"\1.", core)
+    # Collapse a nested braced dot inside a braced superscript: '^{2-^{.}}' -> '^{2-.}' (explicit form)
+    core = re.sub(r"\^\{([^}]*)\^\{?\.([^}]*)\}", r"^{\1.\2}", core)
     # normalize radicals and charges inline
     core = core.replace("^{.-}", "•-").replace("^{.+}", "•+")
     core = core.replace("\\cdot", "•").replace("\\bullet", "•")
-    # simplify superscripts/subscripts
-    core = _sup_re.sub(lambda mo: f"^{mo.group(1) or mo.group(2)}", core)
-    core = _sub_re.sub(lambda mo: f"_{mo.group(1) or mo.group(2)}", core)
+    # simplify superscripts/subscripts and ALWAYS keep braces in output
+    core = _sup_re.sub(lambda mo: f"^{{{mo.group(1) or mo.group(2)}}}", core)
+    core = _sub_re.sub(lambda mo: f"_{{{mo.group(1) or mo.group(2)}}}", core)
     # collapse spaces
     core = _spaces_re.sub(" ", core).strip()
     # Split reactants/products
@@ -302,25 +314,55 @@ def count_reactions(con: sqlite3.Connection) -> int:
     row = con.execute("SELECT COUNT(*) FROM reactions").fetchone()
     return int(row[0]) if row else 0
 
+def canonicalize_source_path(p: str) -> str:
+    try:
+        base = Path(BASE_DIR).resolve()
+        pp = Path(p).resolve()
+        try:
+            rel = pp.relative_to(base)
+            return str(rel).replace('\\', '/')
+        except Exception:
+            return pp.name  # fallback to filename-only
+    except Exception:
+        return Path(p).name
+
 
 def set_validated_by_source(con: sqlite3.Connection, source_path: str, validated: bool, *, by: Optional[str] = None, at_iso: Optional[str] = None) -> int:
     """Set validated flag and metadata for all reactions from a given source path.
 
+    Tries to match by canonical relative path; if nothing updated, falls back to matching by filename.
     If validated is True, set validated_by and validated_at; if False, clear them.
     Returns number of rows updated.
     """
+    src_canon = canonicalize_source_path(source_path)
+    # First try exact canonical match
     if validated:
         cur = con.execute(
             "UPDATE reactions SET validated = 1, validated_by = ?, validated_at = ?, updated_at = datetime('now') WHERE source_path = ?",
-            (by, at_iso, source_path),
+            (by, at_iso, src_canon),
         )
     else:
         cur = con.execute(
             "UPDATE reactions SET validated = 0, validated_by = NULL, validated_at = NULL, updated_at = datetime('now') WHERE source_path = ?",
-            (source_path,),
+            (src_canon,),
         )
+    updated = cur.rowcount
+    if updated == 0:
+        # Fallback: match by filename suffix to handle legacy absolute paths
+        filename = Path(source_path).name
+        if validated:
+            cur = con.execute(
+                "UPDATE reactions SET validated = 1, validated_by = ?, validated_at = ?, updated_at = datetime('now') WHERE source_path LIKE '%' || ?",
+                (by, at_iso, filename),
+            )
+        else:
+            cur = con.execute(
+                "UPDATE reactions SET validated = 0, validated_by = NULL, validated_at = NULL, updated_at = datetime('now') WHERE source_path LIKE '%' || ?",
+                (filename,),
+            )
+        updated = cur.rowcount
     con.commit()
-    return cur.rowcount
+    return updated
 
 
 def list_reactions(
@@ -377,17 +419,24 @@ def get_reaction_with_measurements(con: sqlite3.Connection, reaction_id: int) ->
     ).fetchall()
     return {"reaction": r, "measurements": ms}
 
-
 def get_validation_meta_by_source(con: sqlite3.Connection, source_path: str) -> Dict[str, Any]:
     """Return {'validated': bool, 'by': str|None, 'at': str|None} for a given source path.
 
+    Attempts exact canonical match first, then falls back to filename match.
     If multiple rows exist for the same source, prefer any row with validated=1,
     otherwise return the first row's metadata (likely None).
     """
+    src_canon = canonicalize_source_path(source_path)
     row = con.execute(
         "SELECT validated, validated_by, validated_at FROM reactions WHERE source_path = ? ORDER BY validated DESC LIMIT 1",
-        (source_path,)
+        (src_canon,)
     ).fetchone()
+    if not row:
+        filename = Path(source_path).name
+        row = con.execute(
+            "SELECT validated, validated_by, validated_at FROM reactions WHERE source_path LIKE '%' || ? ORDER BY validated DESC LIMIT 1",
+            (filename,)
+        ).fetchone()
     if not row:
         return {"validated": False, "by": None, "at": None}
     return {"validated": bool(row[0]), "by": row[1], "at": row[2]}

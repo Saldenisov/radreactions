@@ -3,10 +3,10 @@ from PIL import Image
 from pathlib import Path
 import json
 from datetime import datetime
-from config import AVAILABLE_TABLES, get_table_paths, BASE_DIR
-from tsv_utils import tsv_to_visible, visible_to_tsv, correct_tsv_file
-from pdf_utils import tsv_to_full_latex_article, compile_tex_to_pdf
-from auth_db import show_user_profile_page
+from app.config import AVAILABLE_TABLES, get_table_paths, BASE_DIR
+from app.tsv_utils import tsv_to_visible, visible_to_tsv, correct_tsv_file
+from app.pdf_utils import tsv_to_full_latex_article, compile_tex_to_pdf
+from app.auth_db import show_user_profile_page
 
 # Try import fitz (PyMuPDF)
 try:
@@ -61,7 +61,7 @@ def show_validation_interface(current_user):
         imgs = sorted([p.name for p in img_dir.glob('*.png')])
         return imgs, tsv_dir
 
-    from reactions_db import ensure_db, get_validation_meta_by_source
+from app.reactions_db import ensure_db, get_validation_meta_by_source
     con = ensure_db()
     agg_total = 0
     agg_validated = 0
@@ -94,7 +94,7 @@ def show_validation_interface(current_user):
     # Determine images directly from directory; compute stats from DB
     images_all = sorted([p.name for p in IMAGE_DIR.glob('*.png')])
 
-    from reactions_db import get_validation_meta_by_source
+from app.reactions_db import get_validation_meta_by_source
     con = ensure_db()
     def image_meta(name: str):
         stem = Path(name).stem
@@ -188,14 +188,14 @@ def show_validation_interface(current_user):
             except Exception:
                 exists = None
             if not exists:
-                try:
-                    from import_reactions import import_single_csv
-                    tno = int(table_choice.replace('table','')) if table_choice.startswith('table') else None
-                    if tno and Path(source_file).exists():
-                        rcount, mcount = import_single_csv(Path(source_file), tno)
-                        st.sidebar.info(f"Imported {rcount} reactions from source before syncing validation.")
-                except Exception as e:
-                    st.sidebar.warning(f"Auto-import failed: {e}")
+                    try:
+from app.import_reactions import import_single_csv_idempotent
+                        tno = int(table_choice.replace('table','')) if table_choice.startswith('table') else None
+                        if tno:
+                            rcount, mcount = import_single_csv_idempotent(Path(source_file), tno)
+                            st.sidebar.info(f"Synchronized TSV to DB: {mcount} measurements updated.")
+                    except Exception as e:
+                        st.sidebar.warning(f"Auto-import failed: {e}")
             # Update DB validation state with metadata
             updated = set_validated_by_source(con, source_file, validated, by=current_user if validated else None, at_iso=datetime.now().isoformat() if validated else None)
             if updated == 0 and exists:
@@ -356,6 +356,16 @@ def show_validation_interface(current_user):
                 doc = fitz.open(latex_path.parent / (latex_path.stem + '.pdf'))
                 pix = doc.load_page(0).get_pixmap(matrix=fitz.Matrix(2,2))
                 st.image(pix.tobytes(output='png'), use_container_width=True)
+
+            # Automatically sync TSV to DB (idempotent), regardless of validation state
+            try:
+                from import_reactions import import_single_csv_idempotent
+                tno = int(table_choice.replace('table','')) if table_choice.startswith('table') else None
+                if tno:
+                    rcount, mcount = import_single_csv_idempotent(Path(tsv_path), tno)
+                    st.sidebar.info(f"TSV synced to DB: {mcount} measurements refreshed.")
+            except Exception as e:
+                st.sidebar.warning(f"Auto DB sync failed: {e}")
 
     # === LaTeX TAB ===
     with tab3:

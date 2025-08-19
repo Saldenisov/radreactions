@@ -797,6 +797,56 @@ def show_user_profile_page():
                     st.metric("Changed Passwords", stats['users_changed_password'])
                     st.metric("Pending Requests", stats['pending_registration_requests'])
                 
+                # Admin: Resync from JSON
+                st.markdown("---")
+                st.subheader("🔄 Admin: Resync from JSON")
+                st.caption("Run a one-off sync that imports validated TSV/CSV and updates validation flags. A dry-run will only scan for issues.")
+                # Show BASE_DIR for verification
+                try:
+                    from config import BASE_DIR as _BASE_DIR
+                    st.code(f"BASE_DIR = {_BASE_DIR}")
+                except Exception:
+                    st.warning("Could not resolve BASE_DIR")
+                # Per-table filter
+                table_choice = st.selectbox(
+                    "Table(s)",
+                    options=["All", 5, 6, 7, 8, 9],
+                    format_func=lambda x: {"All": "All Tables", 5: "Table 5", 6: "Table 6", 7: "Table 7", 8: "Table 8", 9: "Table 9"}.get(x, str(x))
+                )
+                chosen_tables = (5,6,7,8,9) if table_choice == "All" else (int(table_choice),)
+                col_sync_btn, col_dry_btn = st.columns([1,1])
+                with col_sync_btn:
+                    do_sync = st.button("Admin: Resync from JSON", type="primary")
+                with col_dry_btn:
+                    do_dry = st.button("Dry-run scan (no writes)")
+                if do_sync or do_dry:
+                    try:
+                        from import_reactions import sync_validations_to_db
+                        st.info("⏳ Running sync... check console logs for details")
+                        summary = sync_validations_to_db(table_numbers=chosen_tables, dry_run=bool(do_dry))
+                        if do_dry:
+                            st.info("Dry-run complete. No changes were written.")
+                        else:
+                            st.success(f"Updated {summary['updated_total']} reactions; imported {summary['imported_total']} sources")
+                        issues = summary.get('issues', [])
+                        if issues:
+                            st.warning(f"Detected {len(issues)} issue(s) during sync. Expand items below to review.")
+                            # Small banner list of common issues first
+                            missing = [i for i in issues if i.get('issue') == 'missing_source_file']
+                            no_rows = [i for i in issues if i.get('issue') == 'no_rows_updated']
+                            if missing:
+                                st.warning(f"{len(missing)} image(s) validated but TSV/CSV not found by stem. Check filenames and locations.")
+                            if no_rows:
+                                st.warning(f"{len(no_rows)} source(s) updated but 0 DB rows changed. Possible path mismatch.")
+                            # Detailed expandable items
+                            for idx, it in enumerate(issues, 1):
+                                with st.expander(f"Issue {idx}: {it.get('issue','unknown')} | Table {it.get('table_no','?')}"):
+                                    st.json(it)
+                        else:
+                            st.info("No issues detected.")
+                    except Exception as e:
+                        st.error(f"Sync failed to execute: {e}")
+                
                 # Raw SQL Query Interface
                 st.markdown("---")
                 st.subheader("🔧 Raw SQL Query Interface")
