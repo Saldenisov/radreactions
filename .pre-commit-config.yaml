@@ -1,5 +1,5 @@
 # See https://pre-commit.com for usage
-# Install: pip install pre-commit && pre-commit install
+# Install: pip install pre-commit \&\& pre-commit install
 # Run on all files: pre-commit run --all-files
 
 # Global excludes for large data and generated content
@@ -58,10 +58,3 @@ repos:
           - --show-error-codes
           - --pretty
         files: \.(py|pyi)$
-
-  # Commit message lint (Conventional Commits)
-  - repo: https://github.com/commitizen-tools/commitizen
-    rev: v4.8.3
-    hooks:
-      - id: commitizen
-        stages: [commit-msg]

@@ -52,8 +52,3 @@ check_untyped_defs = true
 pretty = true
 exclude = ["data", "data-full", ".*ipynb_checkpoints.*"]
 
-[tool.commitizen]
-name = "cz_conventional_commits"
-version = "0.0.0"
-version_files = []
-update_changelog_on_bump = true
