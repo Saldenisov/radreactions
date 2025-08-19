@@ -16,17 +16,15 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first to leverage Docker cache
-COPY requirements.txt .
+COPY ops/requirements.txt ./requirements.txt
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY . .
-
+# Copy application code and data
+COPY app/ ./app/
 # Bake full dataset into the image for cloud deployment (Railway)
 COPY data-full/ /app/data/
-
 # Ensure data directory exists
 RUN mkdir -p /app/data
 
@@ -41,7 +39,7 @@ ENV PYTHONPATH=/app
 HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
 
 # Add startup script that reads $PORT and launches Streamlit
-COPY start.sh /start.sh
+COPY ops/start.sh /start.sh
 # Normalize line endings in case the repo was edited on Windows
 RUN sed -i 's/\r$//' /start.sh && chmod +x /start.sh
 

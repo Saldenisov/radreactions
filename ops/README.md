@@ -1,6 +1,6 @@
-# 🔍 OCR Validator App
+# RadReactions: An open platform for curated radiation radical reaction data
 
-A Streamlit application for validating and correcting OCR results from scientific table images with full LaTeX support.
+RadReactions digitizes, curates, validates, and publishes rate constants for aqueous radical reactions, initially derived from the Buxton Critical Review (DOI: 10.1063/1.555805). It provides a Streamlit app for collaborative validation, a normalized SQLite database with FTS search, and reproducible artifacts (TSV, LaTeX, PDF).
 
 ## ✨ Features
 

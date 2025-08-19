@@ -1,14 +1,15 @@
 version: '3.8'
 
 services:
-  ocr-validator:
-    build: .
+  radreactions:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile
     ports:
       - "8501:8501"
     volumes:
-      # Mount your data directory here
-      # Update the left path to your actual data location
-      - "E:/ICP_notebooks/Buxton:/app/data"
+      # Mount project data-full into the container (override baked data if present)
+      - "../data-full:/app/data"
     environment:
       - BASE_DIR=/app/data
     restart: unless-stopped
