@@ -14,11 +14,11 @@ try {
 $dataPath = "E:\ICP_notebooks\Buxton"
 if (Test-Path $dataPath) {
     Write-Host "✅ Data directory found: $dataPath" -ForegroundColor Green
-    
+
     # Check for table directories
     $tables = @("table5", "table6", "table7", "table8", "table9")
     $foundTables = @()
-    
+
     foreach ($table in $tables) {
         $tablePath = Join-Path $dataPath "$table\sub_tables_images"
         if (Test-Path $tablePath) {
@@ -27,7 +27,7 @@ if (Test-Path $dataPath) {
             Write-Host "  ✅ $table ($imageCount images)" -ForegroundColor Green
         }
     }
-    
+
     if ($foundTables.Count -eq 0) {
         Write-Host "⚠️ No table directories found with proper structure" -ForegroundColor Yellow
     } else {

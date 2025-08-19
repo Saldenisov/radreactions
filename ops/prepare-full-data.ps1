@@ -26,24 +26,24 @@ $totalSize = 0
 
 foreach ($table in $tables) {
     Write-Host "Processing $table..." -ForegroundColor Yellow
-    
+
     $sourceTable = Join-Path $sourceBase "$table\sub_tables_images"
     $targetTable = Join-Path $targetBase "$table\sub_tables_images"
-    
+
     if (-not (Test-Path $sourceTable)) {
         Write-Host "  ⚠️ Source table not found: $sourceTable" -ForegroundColor Yellow
         continue
     }
-    
+
     # Create target directory structure
     New-Item -ItemType Directory -Path $targetTable -Force | Out-Null
     New-Item -ItemType Directory -Path "$targetTable\csv" -Force | Out-Null
     New-Item -ItemType Directory -Path "$targetTable\csv\latex" -Force | Out-Null
-    
+
     # Get all images
     $images = Get-ChildItem "$sourceTable\*.png"
     Write-Host "  Found $($images.Count) images in $table" -ForegroundColor Cyan
-    
+
     foreach ($image in $images) {
         # Copy image (with optional compression)
         if ($CompressImages) {
@@ -54,7 +54,7 @@ foreach ($table in $tables) {
         } else {
             Copy-Item $image.FullName "$targetTable\"
         }
-        
+
         # Copy corresponding CSV file
         $csvFile = Join-Path "$sourceTable\csv" ($image.BaseName + ".csv")
         if (Test-Path $csvFile) {
@@ -62,26 +62,26 @@ foreach ($table in $tables) {
         } else {
             Write-Host "    ⚠️ CSV file not found for: $($image.Name)" -ForegroundColor Yellow
         }
-        
+
         # Copy corresponding PDF file
         $pdfFile = Join-Path "$sourceTable\csv\latex" ($image.BaseName + ".pdf")
         if (Test-Path $pdfFile) {
             Copy-Item $pdfFile "$targetTable\csv\latex\"
         }
-        
+
         $totalCopied++
         $totalSize += $image.Length
-        
+
         # Show progress every 100 files
         if ($totalCopied % 100 -eq 0) {
             Write-Host "    📊 Progress: $totalCopied images copied" -ForegroundColor Blue
         }
     }
-    
+
     # Copy existing validation database or create new one
     $sourceValidationDb = Join-Path $sourceTable "validation_db.json"
     $targetValidationDb = Join-Path $targetTable "validation_db.json"
-    
+
     if (Test-Path $sourceValidationDb) {
         Copy-Item $sourceValidationDb $targetValidationDb
         Write-Host "  ✅ Copied existing validation database" -ForegroundColor Green
@@ -91,11 +91,11 @@ foreach ($table in $tables) {
         foreach ($image in $images) {
             $validationDb[$image.Name] = $false
         }
-        
+
         $validationDb | ConvertTo-Json -Depth 2 | Out-File $targetValidationDb -Encoding utf8
         Write-Host "  ✅ Created new validation database" -ForegroundColor Green
     }
-    
+
     Write-Host "  ✅ Completed $table with $($images.Count) images" -ForegroundColor Green
 }
 
@@ -111,13 +111,13 @@ Write-Host "`n📝 Updating Dockerfile for full data deployment..." -ForegroundC
 $dockerfileContent = Get-Content "Dockerfile" -Raw
 
 # Replace any existing data copy with full data
-$newDockerfile = $dockerfileContent -replace 
+$newDockerfile = $dockerfileContent -replace
     'COPY data-sample/ /app/data/',
     'COPY data-full/ /app/data/'
 
 # If no data copy exists, add it
 if ($newDockerfile -notmatch "COPY data-full") {
-    $newDockerfile = $newDockerfile -replace 
+    $newDockerfile = $newDockerfile -replace
         '# Create data directory for mounting\r\nRUN mkdir -p /app/data',
         "# Copy full dataset for internet deployment`r`nCOPY data-full/ /app/data/`r`n`r`n# Create data directory for mounting`r`nRUN mkdir -p /app/data-mount"
 }
@@ -186,7 +186,7 @@ Write-Host "`n🚀 Next steps:" -ForegroundColor Green
 Write-Host "1. .\setup-github.ps1 - Create GitHub repository" -ForegroundColor Blue
 Write-Host "2. Choose deployment platform:" -ForegroundColor Blue
 Write-Host "   • Railway: May have size limits, consider upgrading plan" -ForegroundColor Yellow
-Write-Host "   • Google Cloud Run: Good for large containers" -ForegroundColor Blue  
+Write-Host "   • Google Cloud Run: Good for large containers" -ForegroundColor Blue
 Write-Host "   • AWS ECS: Best for production with large datasets" -ForegroundColor Blue
 Write-Host "3. Set environment variables:" -ForegroundColor Blue
 Write-Host "   • BASE_DIR=/app/data" -ForegroundColor Yellow

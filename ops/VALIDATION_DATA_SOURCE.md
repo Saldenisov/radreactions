@@ -8,4 +8,3 @@ To avoid accidental overwrites in deployments (e.g., Railway), validation JSON f
 **/*_validation_db.json
 
 Validation toggles in the UI now directly update the DB, and the Browse/Validated tabs read validator name and timestamp from the DB.
-

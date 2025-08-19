@@ -83,7 +83,7 @@ az container create \
 
 ### **Your Dataset**: 3,551 images across 5 tables
 - **table5**: 25 images
-- **table6**: 1,527 images  
+- **table6**: 1,527 images
 - **table7**: 578 images
 - **table8**: 1,284 images
 - **table9**: 137 images

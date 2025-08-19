@@ -1,5 +1,6 @@
 import json
 
+
 def load_db(path, image_dir):
     """Load validation DB and normalize schema.
 
@@ -28,18 +29,22 @@ def load_db(path, image_dir):
         if changed:
             path.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
         return raw
-    imgs = sorted([f.name for f in image_dir.iterdir() if f.suffix.lower()=='.png'])
+    imgs = sorted([f.name for f in image_dir.iterdir() if f.suffix.lower() == ".png"])
     db_init = {img: {"validated": False, "by": None, "at": None} for img in imgs}
     path.write_text(json.dumps(db_init, indent=2, ensure_ascii=False), encoding="utf-8")
     return db_init
 
+
 def get_stats_for_table(db):
     total = len(db)
+
     def _is_valid(v):
         return (v is True) or (isinstance(v, dict) and bool(v.get("validated", False)))
+
     validated = sum(1 for v in db.values() if _is_valid(v))
     percent = 100 * validated / total if total > 0 else 0
     return total, validated, percent
+
 
 def aggregate_stats(available_tables, get_table_paths):
     total = 0

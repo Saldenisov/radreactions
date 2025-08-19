@@ -16,7 +16,7 @@ Write-Host "=====================================`n" -ForegroundColor Green
 # Step 1: Prepare full dataset
 if (-not $SkipDataPrep) {
     Write-Host "📦 Step 1: Preparing full dataset (3,551 images)..." -ForegroundColor Yellow
-    
+
     if (Test-Path ".\prepare-full-data.ps1") {
         .\prepare-full-data.ps1
         if ($LASTEXITCODE -ne 0) {
@@ -27,7 +27,7 @@ if (-not $SkipDataPrep) {
         Write-Host "❌ prepare-full-data.ps1 not found" -ForegroundColor Red
         exit 1
     }
-    
+
     Write-Host "✅ Data preparation complete`n" -ForegroundColor Green
 } else {
     Write-Host "⏭️ Skipping data preparation`n" -ForegroundColor Blue
@@ -36,7 +36,7 @@ if (-not $SkipDataPrep) {
 # Step 2: Setup GitHub repository
 if (-not $SkipGitHub) {
     Write-Host "🐙 Step 2: Setting up GitHub repository..." -ForegroundColor Yellow
-    
+
     if (Test-Path ".\setup-github.ps1") {
         .\setup-github.ps1 -RepoName $RepoName
         if ($LASTEXITCODE -ne 0) {
@@ -47,7 +47,7 @@ if (-not $SkipGitHub) {
         Write-Host "❌ setup-github.ps1 not found" -ForegroundColor Red
         exit 1
     }
-    
+
     Write-Host "✅ GitHub repository setup complete`n" -ForegroundColor Green
 } else {
     Write-Host "⏭️ Skipping GitHub setup`n" -ForegroundColor Blue

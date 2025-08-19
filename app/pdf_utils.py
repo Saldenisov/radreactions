@@ -1,8 +1,9 @@
 import csv
+import re
 import subprocess
 from pathlib import Path
-import re
-from tsv_utils import fix_radical_dots
+
+from app.tsv_utils import fix_radical_dots
 
 
 def _strip_math_delims(s: str) -> str:
@@ -27,28 +28,28 @@ def _normalize_reaction(s: str) -> str:
     s = re.sub(r"\^\s*(\\dot\{[A-Za-z]\})", r"\1", s)
     s = re.sub(r"\^\{\\cdot\s*([+-])\}", r"^{\\cdot\1}", s)
     s = re.sub(r"\^\{\s*([+-])\s*\}", r"^{\1}", s)
-    
+
     # mhchem-safe radical/charge normalization
     # O^{\cdot-} -> O^{.-} (mhchem prefers simple dot notation)
     s = re.sub(r"\^\{\\cdot\s*([+-])\}", r"^{.\1}", s)
     # CO2^{-} -> CO2^- (remove braces around simple charges)
     s = re.sub(r"\^\{([+-])\}", r"^\1", s)
-    
+
     # Fix prefix notation: wrap n-, i-, sec-, tert- in \text{}
     s = re.sub(r"\b([nist])-\b", r"\\text{\1-}", s)  # n-, i-, s-, t-
     s = re.sub(r"\b(sec|tert)-\b", r"\\text{\1-}", s)  # sec-, tert-
-    s = re.sub(r"\bn\s*\{\-\}", r"\\text{n-}", s)      # n{-} -> \text{n-}
-    
+    s = re.sub(r"\bn\s*\{\-\}", r"\\text{n-}", s)  # n{-} -> \text{n-}
+
     # Handle prose/notes inside reactions - wrap in \text{} or convert to arrow notation
     # H\ abstr. -> [\text{H abstraction}] (arrow annotation)
     s = re.sub(r"H\\\s*abstr\.", r"[\\text{H abstraction}]", s)
     # General pattern: if we see plain words, wrap them
     s = re.sub(r"\babstr\b\.?", r"\\text{abstraction}", s)
     s = re.sub(r"\bproducts\b", r"\\text{products}", s)
-    
+
     # Remove subscript underscores (mhchem doesn't use _)
     s = re.sub(r"([A-Za-z])_([0-9]+)", r"\1\2", s)
-    
+
     # Ensure we don't end or start with a bare arrow inside \ce{...}
     # Append placeholder if RHS is missing
     if re.search(r"(<\=|\=>|<\->|->|<-|<\=>)\s*$", s):
@@ -56,7 +57,7 @@ def _normalize_reaction(s: str) -> str:
     # Prepend placeholder if LHS is missing
     if re.match(r"^\s*(<\=|\=>|<\->|->|<-|<\=>)", s):
         s = "~ " + s.lstrip()
-    
+
     return s
 
 
@@ -77,11 +78,19 @@ def _normalize_math(s: str) -> str:
     s = s.replace("−", "-")
     return s
 
+
 def escape_latex(s):
     s = s.replace("\\", "\\textbackslash{}")
-    for a, b in [("&", "\\&"), ("%", "\\%"), ("#", "\\#"),
-                 ("_", "\\_"), ("{", "\\{"), ("}", "\\}"),
-                 ("^", "\\^{}"), ("~", "\\~{}")]:
+    for a, b in [
+        ("&", "\\&"),
+        ("%", "\\%"),
+        ("#", "\\#"),
+        ("_", "\\_"),
+        ("{", "\\{"),
+        ("}", "\\}"),
+        ("^", "\\^{}"),
+        ("~", "\\~{}"),
+    ]:
         s = s.replace(a, b)
     return s
 
@@ -101,13 +110,13 @@ def _split_preserve_math_and_ce(s: str):
     while i < n:
         ch = s[i]
         # $ ... $ math (handles escaped $)
-        if ch == '$':
+        if ch == "$":
             j = i + 1
             while j < n:
-                if s[j] == '\\' and j + 1 < n:
+                if s[j] == "\\" and j + 1 < n:
                     j += 2
                     continue
-                if s[j] == '$':
+                if s[j] == "$":
                     j += 1
                     break
                 j += 1
@@ -135,16 +144,16 @@ def _split_preserve_math_and_ce(s: str):
         if s.startswith(r"\ce{", i):
             j = i + 4
             depth = 0
-            if j < n and s[j] == '{':
+            if j < n and s[j] == "{":
                 depth = 1
                 j += 1
                 while j < n and depth > 0:
                     c = s[j]
-                    if c == '{':
+                    if c == "{":
                         depth += 1
-                    elif c == '}':
+                    elif c == "}":
                         depth -= 1
-                    elif c == '\\' and j + 1 < n:
+                    elif c == "\\" and j + 1 < n:
                         j += 2
                         continue
                     j += 1
@@ -154,7 +163,7 @@ def _split_preserve_math_and_ce(s: str):
 
         # Plain text up to next special opener
         next_positions = []
-        for opener in ['$', r"\(", r"\[", r"\ce{"]:
+        for opener in ["$", r"\(", r"\[", r"\ce{"]:
             pos = s.find(opener, i)
             if pos != -1:
                 next_positions.append(pos)
@@ -172,6 +181,7 @@ def _normalize_inline_chem_to_ce(s: str) -> str:
       $\mathrm{\cdot OH + CO_3^{2-}}$ -> \ce{.OH + CO3^{2-}}
       $\ce{^\cdot{OH} + CO_3^{2-}}$   -> \ce{.OH + CO3^{2-}}
     """
+
     def norm_payload(payload: str) -> str:
         t = payload
         # unify whitespace
@@ -196,16 +206,24 @@ def _normalize_inline_chem_to_ce(s: str) -> str:
         return t
 
     # $\mathrm{...}$ -> \ce{...}
-    s = re.sub(r"\$\\mathrm\{([^}]*)\}\$",
-               lambda m: r"\\ce{" + norm_payload(m.group(1)) + r"}", s)
+    s = re.sub(
+        r"\$\\mathrm\{([^}]*)\}\$",
+        lambda m: r"\\ce{" + norm_payload(m.group(1)) + r"}",
+        s,
+    )
     # \(\mathrm{...}\) -> \ce{...}
-    s = re.sub(r"\\\(\\mathrm\{([^}]*)\}\\\)",
-               lambda m: r"\\ce{" + norm_payload(m.group(1)) + r"}", s)
+    s = re.sub(
+        r"\\\(\\mathrm\{([^}]*)\}\\\)",
+        lambda m: r"\\ce{" + norm_payload(m.group(1)) + r"}",
+        s,
+    )
+
     # $\ce{...}$ -> \ce{...} with normalized payload
     def _norm_ce_math(m):
         inner = m.group(1)
         inner = norm_payload(inner)
         return r"\\ce{" + inner + r"}"
+
     s = re.sub(r"\$\\ce\{([^}]*)\}\$", _norm_ce_math, s)
     # \(\ce{...}\) -> \ce{...}
     s = re.sub(r"\\\(\\ce\{([^}]*)\}\\\)", _norm_ce_math, s)
@@ -215,6 +233,7 @@ def _normalize_inline_chem_to_ce(s: str) -> str:
         inner = m.group(1)
         inner = norm_payload(inner)
         return r"\ce{" + inner + r"}"
+
     s = re.sub(r"\\ce\{([^}]*)\}", _norm_ce_payload, s)
     return s
 
@@ -230,7 +249,8 @@ def escape_text_allow_ce(s: str) -> str:
             pieces.append(seg)
         else:
             pieces.append(escape_latex(seg))
-    return ''.join(pieces)
+    return "".join(pieces)
+
 
 def tsv_to_full_latex_article(tsv_path):
     tsv_path = Path(tsv_path)
@@ -245,7 +265,7 @@ def tsv_to_full_latex_article(tsv_path):
         "pH",
         r"\parbox{3.5cm}{\centering Rate constant\\ (L\,mol$^{-1}$\,s$^{-1}$)}",
         "Comments",
-        "Reference"
+        "Reference",
     ]
 
     rows = []
@@ -265,14 +285,14 @@ def tsv_to_full_latex_article(tsv_path):
         "",
         "\\begin{document}",
         "\\begin{landscape}",
-        "\\begin{table}[htbp]", 
+        "\\begin{table}[htbp]",
         "\\centering",
         "\\footnotesize",
         "\\renewcommand{\\arraystretch}{1.2}",
         "\\begin{tabular}{lp{5cm}p{6cm}llp{8cm}l}",
         "\\toprule",
         " & ".join(header) + " \\\\",
-        "\\midrule"
+        "\\midrule",
     ]
 
     for row in rows:
@@ -282,7 +302,7 @@ def tsv_to_full_latex_article(tsv_path):
         ph_cell = escape_text_allow_ce(row[3]) if row[3].strip() else "~"
 
         rate_raw = _strip_math_delims(row[4])
-        rate_cell = f"$%s$" % (_normalize_math(rate_raw)) if rate_raw.strip() else "~"
+        rate_cell = "$%s$" % (_normalize_math(rate_raw)) if rate_raw.strip() else "~"
 
         comments_cell = escape_text_allow_ce(row[5]) if row[5].strip() else "~"
 
@@ -295,26 +315,33 @@ def tsv_to_full_latex_article(tsv_path):
             comments_cell,
             escape_text_allow_ce(row[6]) if row[6].strip() else "~",
         ]
-        latex.append(" \u0026 ".join(formatted) + " " + ("\\"*2))
+        latex.append(" \u0026 ".join(formatted) + " " + ("\\" * 2))
 
-    latex.extend([
-        "\\bottomrule",
-        "\\end{tabular}",
-        "%\\caption{Kinetic data table}",
-        "%\\label{tab:kinetics}",
-        "\\end{table}",
-        "\\end{landscape}",
-        "\\end{document}"
-    ])
+    latex.extend(
+        [
+            "\\bottomrule",
+            "\\end{tabular}",
+            "%\\caption{Kinetic data table}",
+            "%\\label{tab:kinetics}",
+            "\\end{table}",
+            "\\end{landscape}",
+            "\\end{document}",
+        ]
+    )
 
-    with open(latex_path, 'w', encoding='utf-8') as f:
+    with open(latex_path, "w", encoding="utf-8") as f:
         f.write("\n".join(latex))
     return latex_path
 
+
 def compile_tex_to_pdf(latex_path):
     latex_path = Path(latex_path)
-    proc = subprocess.run([
-        'xelatex', '-interaction=nonstopmode', '-halt-on-error',
-        latex_path.name
-    ], cwd=latex_path.parent, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    proc = subprocess.run(
+        ["xelatex", "-interaction=nonstopmode", "-halt-on-error", latex_path.name],
+        check=False,
+        cwd=latex_path.parent,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
     return proc.returncode, proc.stdout

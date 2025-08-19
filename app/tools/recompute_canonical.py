@@ -1,5 +1,7 @@
-from reactions_db import ensure_db, latex_to_canonical
 import json
+
+from app.reactions_db import ensure_db, latex_to_canonical
+
 
 def recompute_all():
     con = ensure_db()
@@ -24,6 +26,6 @@ def recompute_all():
     con.commit()
     print({"updated": updated})
 
+
 if __name__ == "__main__":
     recompute_all()
-

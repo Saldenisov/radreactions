@@ -2,7 +2,7 @@
 param(
     [Parameter(Mandatory=$true)]
     [string]$RepoName = "ocr-validator-app",
-    
+
     [Parameter(Mandatory=$false)]
     [string]$Description = "OCR Validator App with LaTeX support for scientific tables"
 )
@@ -88,10 +88,10 @@ Write-Host "🌐 Creating GitHub repository..." -ForegroundColor Yellow
 try {
     gh repo create $RepoName --public --description $Description --source=. --remote=origin --push
     Write-Host "✅ Repository created successfully!" -ForegroundColor Green
-    
+
     $repoUrl = "https://github.com/$(gh api user --jq .login)/$RepoName"
     Write-Host "🔗 Repository URL: $repoUrl" -ForegroundColor Cyan
-    
+
     Write-Host "`n🚀 Next steps for internet deployment:" -ForegroundColor Green
     Write-Host "1. Choose a platform:" -ForegroundColor White
     Write-Host "   • Railway.app (recommended): $repoUrl -> Deploy" -ForegroundColor Blue
@@ -103,7 +103,7 @@ try {
     Write-Host "`n3. Your app will be live at a URL like:" -ForegroundColor White
     Write-Host "   • https://your-app.railway.app" -ForegroundColor Cyan
     Write-Host "   • https://your-app.onrender.com" -ForegroundColor Cyan
-    
+
 } catch {
     Write-Host "❌ Error creating repository: $_" -ForegroundColor Red
     Write-Host "💡 You can create it manually at: https://github.com/new" -ForegroundColor Yellow

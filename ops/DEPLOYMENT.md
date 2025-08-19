@@ -23,7 +23,7 @@ Your OCR Validator App is now ready for Docker deployment with:
 # Make scripts executable
 chmod +x *.sh
 
-# Deploy the application  
+# Deploy the application
 ./deploy.sh
 ```
 
@@ -41,7 +41,7 @@ Once deployed, access your app at:
 ## 📊 Your Data Summary
 
 - ✅ **table5**: 25 images
-- ✅ **table6**: 1,527 images  
+- ✅ **table6**: 1,527 images
 - ✅ **table7**: 578 images
 - ✅ **table8**: 1,284 images
 - ✅ **table9**: 137 images
@@ -56,7 +56,7 @@ Once deployed, access your app at:
 3. Share: `http://YOUR_IP:8501`
 4. Ensure Windows Firewall allows port 8501
 
-### Option 2: Server Deployment  
+### Option 2: Server Deployment
 1. Copy app folder to server
 2. Update data path in `docker-compose.yml`
 3. Run `docker-compose up -d`
@@ -134,7 +134,7 @@ docker-compose logs ocr-validator
 
 Your OCR Validator App is production-ready with:
 - ✅ Full Docker containerization
-- ✅ LaTeX support for PDF generation  
+- ✅ LaTeX support for PDF generation
 - ✅ All dependencies included
 - ✅ Easy deployment scripts
 - ✅ Comprehensive documentation

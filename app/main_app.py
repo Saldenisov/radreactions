@@ -1,24 +1,37 @@
-import streamlit as st
-from pathlib import Path
 import math
-from app.config import BASE_DIR
-from app.auth_db import check_authentication, show_login_page, logout_user, auth_db, show_user_profile_page
+import sys
+from pathlib import Path
+from typing import Any
 
-from app.validate_embedded import show_validation_interface
+import streamlit as st
+
+# Ensure project root is on sys.path when running via Streamlit from app/
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from app.auth_db import (
+    auth_db,
+    check_authentication,
+    logout_user,
+    show_user_profile_page,
+)
 from app.reactions_db import (
     ensure_db,
-    list_reactions,
     get_reaction_with_measurements,
     get_validation_meta_by_source,
+    list_reactions,
     search_reactions,
 )
+from app.validate_embedded import show_validation_interface
 
 st.set_page_config(page_title="Radical Reactions Platform (Buxton)", layout="wide")
 
+
 # --- Simple activity logger ---
 def _init_activity_log():
-    if 'activity_log' not in st.session_state:
+    if "activity_log" not in st.session_state:
         st.session_state.activity_log = []
+
 
 def log_event(msg: str):
     try:
@@ -31,34 +44,35 @@ def log_event(msg: str):
     if len(st.session_state.activity_log) > 100:
         st.session_state.activity_log = st.session_state.activity_log[-100:]
 
+
 # Check authentication status
-print(f"[MAIN PAGE] Starting main page load")
+print("[MAIN PAGE] Starting main page load")
 print(f"[MAIN PAGE] Session state page_mode: {st.session_state.get('page_mode', 'main')}")
 current_user = check_authentication()
 print(f"[MAIN PAGE] Current user from check_authentication(): {current_user}")
 
 # === CHECK IF WE'RE IN VALIDATION MODE ===
-if st.session_state.get('page_mode') == 'validate':
-    print(f"[MAIN PAGE] Entering validation mode")
-    
+if st.session_state.get("page_mode") == "validate":
+    print("[MAIN PAGE] Entering validation mode")
+
     # Check authentication for validation page
     if not current_user:
         st.error("❌ **Authentication Required for Validation**")
         st.info("Your session may have expired. Please log in again.")
-        st.session_state.page_mode = 'main'  # Return to main page
+        st.session_state.page_mode = "main"  # Return to main page
         st.rerun()
-    
+
     # Show validation interface
     show_validation_interface(current_user)
     st.stop()  # Don't show main page content
 
 # === CHECK IF WE'RE IN PROFILE/ADMIN MODE ===
-if st.session_state.get('page_mode') == 'profile':
-    print(f"[MAIN PAGE] Entering profile/admin mode")
+if st.session_state.get("page_mode") == "profile":
+    print("[MAIN PAGE] Entering profile/admin mode")
     if not current_user:
         st.error("❌ **Authentication Required**")
         st.info("Your session may have expired. Please log in again.")
-        st.session_state.page_mode = 'main'
+        st.session_state.page_mode = "main"
         st.rerun()
     show_user_profile_page()
     st.stop()
@@ -68,7 +82,9 @@ header_col1, header_col2 = st.columns([3, 1])
 
 with header_col1:
     st.title("Radical Reactions Platform")
-    st.subheader("Digitizing and validating radiation radical reactions from Buxton Critical Review")
+    st.subheader(
+        "Digitizing and validating radiation radical reactions from Buxton Critical Review"
+    )
 
 with header_col2:
     if current_user:
@@ -77,7 +93,7 @@ with header_col2:
         with c1:
             if st.button("👤 Profile/Admin", type="secondary"):
                 log_event("Profile/Admin button clicked")
-                st.session_state.page_mode = 'profile'
+                st.session_state.page_mode = "profile"
                 st.rerun()
         with c2:
             if st.button("🚪 Logout", type="secondary"):
@@ -93,29 +109,30 @@ with header_col2:
 st.markdown("---")
 
 # === LOGIN FORM (if requested) ===
-if st.session_state.get('show_login', False) and not current_user:
+if st.session_state.get("show_login", False) and not current_user:
     st.header("🔐 Login")
-    
+
     with st.form("login_form"):
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
         login_col1, login_col2 = st.columns([1, 1])
-        
+
         with login_col1:
             submit_button = st.form_submit_button("Login", type="primary")
         with login_col2:
             cancel_button = st.form_submit_button("Cancel")
-        
+
         if cancel_button:
             log_event("Login form canceled")
             st.session_state.show_login = False
             st.rerun()
-            
+
         if submit_button:
             if username and password:
                 success, message = auth_db.authenticate_user(username, password)
                 if success:
                     from app.auth_db import login_user
+
                     login_user(username)
                     st.session_state.show_login = False
                     st.success(message)
@@ -125,14 +142,16 @@ if st.session_state.get('show_login', False) and not current_user:
                     st.error(message)
             else:
                 st.error("Please enter both username and password")
-    
+
     st.markdown("---")
     st.markdown("### New User Registration")
-    st.markdown("To request a new account, please email **sergey.denisov@universite-paris-saclay.fr** with:")
+    st.markdown(
+        "To request a new account, please email **sergey.denisov@universite-paris-saclay.fr** with:"
+    )
     st.markdown("- Requested username")
     st.markdown("- Your institutional email")
     st.markdown("- Justification for access")
-    
+
     st.stop()  # Don't show the rest of the page during login
 
 # === MAIN CONTENT ===
@@ -141,7 +160,7 @@ with col1:
     st.markdown(
         """
         This project develops an open platform for radiation radical reactions, initially curated from the Buxton Critical Review of Rate Constants for Reactions of Hydrated Electrons, Hydrogen Atoms and Hydroxyl Radicals in Aqueous Solution (DOI: 10.1063/1.555805). The workflow is:
-        
+
         - Extract and correct TSV files from table images
         - Generate LaTeX/PDF for human-readable rendering
         - Validate entries collaboratively
@@ -161,11 +180,11 @@ with col2:
             ### 🔍 Access Validation Workflow
             """
         )
-        
+
         if st.button("🔍 Go to Validation Page", type="primary", use_container_width=True):
-            print(f"[MAIN PAGE] User clicked validation button, setting page_mode to 'validate'")
+            print("[MAIN PAGE] User clicked validation button, setting page_mode to 'validate'")
             log_event("Navigate to Validation Page button clicked")
-            st.session_state.page_mode = 'validate'
+            st.session_state.page_mode = "validate"
             st.rerun()
     else:
         st.info(
@@ -175,17 +194,18 @@ with col2:
 
 st.markdown("---")
 
-# Activity log (compact)
-with st.expander("🪵 Activity Log", expanded=False):
-    _init_activity_log()
-    if st.session_state.activity_log:
-        for entry in st.session_state.activity_log[-15:]:
-            st.write(f"- {entry}")
-    else:
-        st.caption("No activity yet")
+# Activity log (visible only to superuser)
+if current_user == "saldenisov":
+    with st.expander("🪵 Activity Log", expanded=False):
+        _init_activity_log()
+        if st.session_state.activity_log:
+            for entry in st.session_state.activity_log[-15:]:
+                st.write(f"- {entry}")
+        else:
+            st.caption("No activity yet")
 
 # === BROWSE + SEARCH TABS ===
-browse_tab, search_tab = st.tabs(["📚 Browse Reactions", "🔎 Search Reactions"]) 
+browse_tab, search_tab = st.tabs(["📚 Browse Reactions", "🔎 Search Reactions"])
 
 con = ensure_db()
 
@@ -193,7 +213,9 @@ with browse_tab:
     left, right = st.columns([1.2, 2])
     with left:
         name_filter = st.text_input("Filter by name/formula", placeholder="type to filter...")
-        rows_all = list_reactions(con, name_filter=name_filter or None, limit=2000, validated_only=True)
+        rows_all = list_reactions(
+            con, name_filter=name_filter or None, limit=2000, validated_only=True
+        )
         if not rows_all:
             st.info("No validated reactions yet.")
         else:
@@ -202,10 +224,10 @@ with browse_tab:
             total = len(rows_all)
             total_pages = max(1, math.ceil(total / PAGE_SIZE))
             # Reset page when filter changes
-            if st.session_state.get('browse_last_filter') != (name_filter or ''):
+            if st.session_state.get("browse_last_filter") != (name_filter or ""):
                 st.session_state.browse_page = 0
-                st.session_state.browse_last_filter = (name_filter or '')
-            page = int(st.session_state.get('browse_page', 0))
+                st.session_state.browse_last_filter = name_filter or ""
+            page = int(st.session_state.get("browse_page", 0))
             page = max(0, min(page, total_pages - 1))
             start = page * PAGE_SIZE
             end = min(start + PAGE_SIZE, total)
@@ -227,44 +249,46 @@ with browse_tab:
                     st.rerun()
 
             # Build a simple list with per-row checkboxes (only Name and Formula)
-            if 'browse_selected' not in st.session_state:
+            if "browse_selected" not in st.session_state:
                 st.session_state.browse_selected = set()
-            current_selected = set(st.session_state.get('browse_selected', set()))
+            current_selected = set(st.session_state.get("browse_selected", set()))
             new_selected = set()
             for r in page_rows:
-                rid = int(r['id'])
-                label_name = (r['reaction_name'] or '').strip()
+                rid = int(r["id"])
+                label_name = (r["reaction_name"] or "").strip()
                 label = f"{label_name} | {r['formula_canonical']}".strip(" |")
-                checked = st.checkbox(label, value=(rid in current_selected), key=f"browse_chk_{rid}")
+                checked = st.checkbox(
+                    label, value=(rid in current_selected), key=f"browse_chk_{rid}"
+                )
                 if checked:
                     new_selected.add(rid)
             st.session_state.browse_selected = new_selected
             st.session_state.selected_reaction_ids = sorted(list(new_selected))
     with right:
-        sel_ids = st.session_state.get('selected_reaction_ids', [])
+        sel_ids = st.session_state.get("selected_reaction_ids", [])
         if not sel_ids:
             st.info("Select one or more reactions from the table to view details.")
         else:
             for rid in sel_ids:
                 data = get_reaction_with_measurements(con, rid)
-                r = data.get('reaction')
-                ms = data.get('measurements', [])
-                if not r:
+                rec: Any = data.get("reaction")
+                ms = data.get("measurements", [])
+                if not rec:
                     continue
-                with st.expander(r['reaction_name'] or r['formula_canonical'], expanded=False):
-                    st.markdown(f"**Table:** {r['table_no']} ({r['table_category']})")
-                    st.latex(r['formula_latex'])
-                    st.code(f"Reactants: {r['reactants']}\nProducts: {r['products']}")
-                    if r['notes']:
-                        st.markdown(f"**Notes:** {r['notes']}")
+                with st.expander(rec["reaction_name"] or rec["formula_canonical"], expanded=False):
+                    st.markdown(f"**Table:** {rec['table_no']} ({rec['table_category']})")
+                    st.latex(rec["formula_latex"])
+                    st.code(f"Reactants: {rec['reactants']}\nProducts: {rec['products']}")
+                    if rec["notes"]:
+                        st.markdown(f"**Notes:** {rec['notes']}")
                     # Validator metadata from DB
                     try:
-                        src = r['source_path'] or ''
+                        src = rec["source_path"] or ""
                         if src:
                             meta = get_validation_meta_by_source(con, src)
-                            if meta.get('validated'):
-                                who = meta.get('by') or 'unknown'
-                                when = meta.get('at') or 'unknown time'
+                            if meta.get("validated"):
+                                who = meta.get("by") or "unknown"
+                                when = meta.get("at") or "unknown time"
                                 st.markdown(f"**Validated by:** {who}  ")
                                 st.markdown(f"**Validated at:** {when}")
                     except Exception:
@@ -274,8 +298,14 @@ with browse_tab:
                         st.info("No measurements recorded")
                     else:
                         for m in ms:
-                            ref_label = m['doi'] and f"DOI: https://doi.org/{m['doi']}" or (m['citation_text'] or m['buxton_code'] or "")
-                            st.markdown(f"- pH: {m['pH'] or '-'}; rate: {m['rate_value'] or '-'}; method: {m['method'] or '-'}")
+                            ref_label = (
+                                m["doi"]
+                                and f"DOI: https://doi.org/{m['doi']}"
+                                or (m["citation_text"] or m["buxton_code"] or "")
+                            )
+                            st.markdown(
+                                f"- pH: {m['pH'] or '-'}; rate: {m['rate_value'] or '-'}; method: {m['method'] or '-'}"
+                            )
                             if ref_label:
                                 st.markdown(f"  ↳ Reference: {ref_label}")
 
@@ -284,10 +314,30 @@ with search_tab:
         st.info("🔓 Authenticated Search: full access to DB and advanced filters.")
     else:
         st.info("🌐 Public Search: basic search across reactions DB.")
-    query = st.text_input("Search reactions (text or formula)", placeholder="e.g. e_aq^- OH•, hydroxyl, O2•-", key="search_query")
-    max_hits = st.number_input("Max results", min_value=1, max_value=200, value=25, step=1, key='max_hits')
+    query = st.text_input(
+        "Search reactions (text or formula)",
+        placeholder="e.g. e_aq^- OH•, hydroxyl, O2•-",
+        key="search_query",
+    )
+    max_hits = st.number_input(
+        "Max results", min_value=1, max_value=200, value=25, step=1, key="max_hits"
+    )
     with st.expander("🔧 Advanced Search Options"):
-        table_filter = st.selectbox("Table (category)", options=["All", 5,6,7,8,9], key='table_filter', format_func=lambda x: {"All":"All",5:"Table5 (water radiolysis)",6:"Table6 (e_aq^-) ",7:"Table7 (H•)",8:"Table8 (OH•)",9:"Table9 (O•−)"}[x] if x!="All" else "All")
+        table_filter = st.selectbox(
+            "Table (category)",
+            options=["All", 5, 6, 7, 8, 9],
+            key="table_filter",
+            format_func=lambda x: {
+                "All": "All",
+                5: "Table5 (water radiolysis)",
+                6: "Table6 (e_aq^-) ",
+                7: "Table7 (H•)",
+                8: "Table8 (OH•)",
+                9: "Table9 (O•−)",
+            }[x]
+            if x != "All"
+            else "All",
+        )
     if query:
         table_no = None if table_filter == "All" else int(table_filter)
         try:
@@ -300,11 +350,11 @@ with search_tab:
             for i, r in enumerate(rows, 1):
                 with st.expander(f"Result {i}: {r['formula_canonical']}"):
                     st.markdown(f"**Table:** {r['table_no']} ({r['table_category']})")
-                    if r['reaction_name']:
+                    if r["reaction_name"]:
                         st.markdown(f"**Name:** {r['reaction_name']}")
-                    st.latex(r['formula_latex'])
+                    st.latex(r["formula_latex"])
                     st.code(f"Reactants: {r['reactants']}\nProducts: {r['products']}")
-                    if r['notes']:
+                    if r["notes"]:
                         st.markdown(f"**Notes:** {r['notes']}")
         else:
             st.info("No results found. Try different search terms.")

@@ -1,4 +1,24 @@
-﻿*.db
+# Databases
+*.db
 *.db-shm
 *.db-wal
+
+# Editor/ctags
 tags
+
+# Python bytecode and caches
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Tool caches
+.mypy_cache/
+.pytest_cache/
+ruff_cache/
+.ipynb_checkpoints/

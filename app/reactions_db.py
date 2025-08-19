@@ -1,8 +1,8 @@
-import sqlite3
 import json
 import re
+import sqlite3
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict, Any
+from typing import Any
 
 from app.config import BASE_DIR
 
@@ -16,6 +16,7 @@ TABLE_CATEGORY = {
     9: "Rate constants for reactions of the oxide radical ion in aqueous solution",
 }
 
+
 def connect(db_path: Path = DB_PATH) -> sqlite3.Connection:
     con = sqlite3.connect(str(db_path))
     con.row_factory = sqlite3.Row
@@ -25,6 +26,7 @@ def connect(db_path: Path = DB_PATH) -> sqlite3.Connection:
     except Exception:
         pass
     return con
+
 
 SCHEMA_SQL = r"""
 BEGIN;
@@ -107,6 +109,8 @@ COMMIT;
 """
 
 MIGRATION_NAME_INIT = "001_init"
+
+
 def ensure_db(db_path: Path = DB_PATH) -> sqlite3.Connection:
     con = connect(db_path)
     # check migration applied
@@ -144,6 +148,7 @@ def ensure_db(db_path: Path = DB_PATH) -> sqlite3.Connection:
         pass
     return con
 
+
 # ---------------- Canonicalization -----------------
 
 _math_delims = [(r"$", r"$"), (r"\(", r"\)"), (r"\[", r"\]")]
@@ -172,6 +177,7 @@ phase_map = {
     "aq": "aq",
 }
 
+
 def strip_math(s: str) -> str:
     # remove outer math delimiters if present
     s = s.strip()
@@ -183,9 +189,13 @@ def strip_math(s: str) -> str:
         return s[2:-2]
     return s
 
+
 _defuse_backslashes_re = re.compile(r"\\(rightarrow|ce|cdot|bullet)")
 
-def latex_to_canonical(formula_latex: str) -> Tuple[str, str, str, List[str], List[str]]:
+
+def latex_to_canonical(
+    formula_latex: str,
+) -> tuple[str, str, str, list[str], list[str]]:
     """Return (canonical, reactants, products, reactant_species, product_species)."""
     core = strip_math(formula_latex)
     # Extract inside \ce{...} if present
@@ -212,53 +222,71 @@ def latex_to_canonical(formula_latex: str) -> Tuple[str, str, str, List[str], Li
     parts = [p.strip() for p in core.split("->", 1)]
     reactants = parts[0] if parts else ""
     products = parts[1] if len(parts) > 1 else ""
+
     # Tokenize species by +
-    def toks(side: str) -> List[str]:
+    def toks(side: str) -> list[str]:
         if not side:
             return []
         return [re.sub(r"\s+", " ", t.strip()) for t in side.split("+")]
+
     r_species = toks(reactants)
     p_species = toks(products)
     canonical = f"{reactants} -> {products}" if products else reactants
     return canonical, reactants, products, r_species, p_species
 
+
 # ---------------- Upserts & Search -----------------
 
-def upsert_reference(con: sqlite3.Connection, buxton_code: Optional[str], citation_text: Optional[str], doi: Optional[str]) -> Optional[int]:
+
+def upsert_reference(
+    con: sqlite3.Connection,
+    buxton_code: str | None,
+    citation_text: str | None,
+    doi: str | None,
+) -> int | None:
     if not any([buxton_code, citation_text, doi]):
         return None
     row = con.execute(
         "SELECT id FROM references_map WHERE (buxton_code IS ? OR buxton_code = ?) OR (doi IS ? OR doi = ?) LIMIT 1",
-        (buxton_code, buxton_code, doi, doi)
+        (buxton_code, buxton_code, doi, doi),
     ).fetchone()
     if row:
         ref_id = row[0]
         # update citation or doi if provided
         con.execute(
             "UPDATE references_map SET citation_text = COALESCE(?, citation_text), doi = COALESCE(?, doi), updated_at = datetime('now') WHERE id = ?",
-            (citation_text, doi, ref_id)
+            (citation_text, doi, ref_id),
         )
         return ref_id
     cur = con.execute(
         "INSERT INTO references_map(buxton_code, citation_text, doi) VALUES (?,?,?)",
-        (buxton_code, citation_text, doi)
+        (buxton_code, citation_text, doi),
     )
     return cur.lastrowid
 
 
-def get_or_create_reaction(con: sqlite3.Connection, *, table_no: int, buxton_reaction_number: Optional[str], reaction_name: Optional[str], formula_latex: str, notes: Optional[str], source_path: Optional[str]) -> int:
+def get_or_create_reaction(
+    con: sqlite3.Connection,
+    *,
+    table_no: int,
+    buxton_reaction_number: str | None,
+    reaction_name: str | None,
+    formula_latex: str,
+    notes: str | None,
+    source_path: str | None,
+) -> int:
     category = TABLE_CATEGORY.get(table_no, str(table_no))
     canonical, reactants, products, r_species, p_species = latex_to_canonical(formula_latex)
     # dedup by table_no + canonical
     row = con.execute(
         "SELECT id FROM reactions WHERE table_no = ? AND formula_canonical = ?",
-        (table_no, canonical)
+        (table_no, canonical),
     ).fetchone()
     if row:
         rid = row[0]
         con.execute(
             "UPDATE reactions SET reaction_name = COALESCE(?, reaction_name), notes = COALESCE(?, notes), source_path = COALESCE(?, source_path), updated_at = datetime('now') WHERE id = ?",
-            (reaction_name, notes, source_path, rid)
+            (reaction_name, notes, source_path, rid),
         )
         return rid
     cur = con.execute(
@@ -278,21 +306,55 @@ def get_or_create_reaction(con: sqlite3.Connection, *, table_no: int, buxton_rea
             source_path,
         ),
     )
+    assert cur.lastrowid is not None
     return cur.lastrowid
 
 
-def add_measurement(con: sqlite3.Connection, reaction_id: int, *, pH: Optional[str], temperature_C: Optional[float], rate_value: str, rate_value_num: Optional[float], rate_units: Optional[str], method: Optional[str], conditions: Optional[str], reference_id: Optional[int], source_path: Optional[str], page_info: Optional[str]) -> int:
+def add_measurement(
+    con: sqlite3.Connection,
+    reaction_id: int,
+    *,
+    pH: str | None,
+    temperature_C: float | None,
+    rate_value: str,
+    rate_value_num: float | None,
+    rate_units: str | None,
+    method: str | None,
+    conditions: str | None,
+    reference_id: int | None,
+    source_path: str | None,
+    page_info: str | None,
+) -> int:
     cur = con.execute(
         """
         INSERT INTO measurements(reaction_id, pH, temperature_C, rate_value, rate_value_num, rate_units, method, conditions, reference_id, source_path, page_info)
         VALUES (?,?,?,?,?,?,?,?,?,?,?)
         """,
-        (reaction_id, pH, temperature_C, rate_value, rate_value_num, rate_units, method, conditions, reference_id, source_path, page_info)
+        (
+            reaction_id,
+            pH,
+            temperature_C,
+            rate_value,
+            rate_value_num,
+            rate_units,
+            method,
+            conditions,
+            reference_id,
+            source_path,
+            page_info,
+        ),
     )
+    assert cur.lastrowid is not None
     return cur.lastrowid
 
 
-def search_reactions(con: sqlite3.Connection, query: str, *, table_no: Optional[int] = None, limit: int = 50) -> List[sqlite3.Row]:
+def search_reactions(
+    con: sqlite3.Connection,
+    query: str,
+    *,
+    table_no: int | None = None,
+    limit: int = 50,
+) -> list[sqlite3.Row]:
     if not query:
         return []
     q = query.strip()
@@ -314,20 +376,28 @@ def count_reactions(con: sqlite3.Connection) -> int:
     row = con.execute("SELECT COUNT(*) FROM reactions").fetchone()
     return int(row[0]) if row else 0
 
+
 def canonicalize_source_path(p: str) -> str:
     try:
         base = Path(BASE_DIR).resolve()
         pp = Path(p).resolve()
         try:
             rel = pp.relative_to(base)
-            return str(rel).replace('\\', '/')
+            return str(rel).replace("\\", "/")
         except Exception:
             return pp.name  # fallback to filename-only
     except Exception:
         return Path(p).name
 
 
-def set_validated_by_source(con: sqlite3.Connection, source_path: str, validated: bool, *, by: Optional[str] = None, at_iso: Optional[str] = None) -> int:
+def set_validated_by_source(
+    con: sqlite3.Connection,
+    source_path: str,
+    validated: bool,
+    *,
+    by: str | None = None,
+    at_iso: str | None = None,
+) -> int:
     """Set validated flag and metadata for all reactions from a given source path.
 
     Tries to match by canonical relative path; if nothing updated, falls back to matching by filename.
@@ -368,10 +438,10 @@ def set_validated_by_source(con: sqlite3.Connection, source_path: str, validated
 def list_reactions(
     con: sqlite3.Connection,
     *,
-    name_filter: Optional[str] = None,
+    name_filter: str | None = None,
     limit: int = 1000,
-    validated_only: Optional[bool] = None,
-) -> List[sqlite3.Row]:
+    validated_only: bool | None = None,
+) -> list[sqlite3.Row]:
     """List reactions ordered A->Z by name (fallback to canonical).
 
     Args:
@@ -381,7 +451,7 @@ def list_reactions(
         validated_only: if True, only validated=1; if False, only validated=0; if None, no filter
     """
     where = []
-    params: list[Any] = []  # type: ignore[name-defined]
+    params: list[Any] = []
 
     if name_filter:
         where.append("lower(COALESCE(reaction_name, formula_canonical)) LIKE ?")
@@ -403,7 +473,7 @@ def list_reactions(
     return con.execute(sql, tuple(params)).fetchall()
 
 
-def get_reaction_with_measurements(con: sqlite3.Connection, reaction_id: int) -> Dict[str, Any]:
+def get_reaction_with_measurements(con: sqlite3.Connection, reaction_id: int) -> dict[str, Any]:
     r = con.execute("SELECT * FROM reactions WHERE id = ?", (reaction_id,)).fetchone()
     if not r:
         return {}
@@ -415,11 +485,12 @@ def get_reaction_with_measurements(con: sqlite3.Connection, reaction_id: int) ->
         WHERE m.reaction_id = ?
         ORDER BY m.id ASC
         """,
-        (reaction_id,)
+        (reaction_id,),
     ).fetchall()
     return {"reaction": r, "measurements": ms}
 
-def get_validation_meta_by_source(con: sqlite3.Connection, source_path: str) -> Dict[str, Any]:
+
+def get_validation_meta_by_source(con: sqlite3.Connection, source_path: str) -> dict[str, Any]:
     """Return {'validated': bool, 'by': str|None, 'at': str|None} for a given source path.
 
     Attempts exact canonical match first, then falls back to filename match.
@@ -429,15 +500,14 @@ def get_validation_meta_by_source(con: sqlite3.Connection, source_path: str) -> 
     src_canon = canonicalize_source_path(source_path)
     row = con.execute(
         "SELECT validated, validated_by, validated_at FROM reactions WHERE source_path = ? ORDER BY validated DESC LIMIT 1",
-        (src_canon,)
+        (src_canon,),
     ).fetchone()
     if not row:
         filename = Path(source_path).name
         row = con.execute(
             "SELECT validated, validated_by, validated_at FROM reactions WHERE source_path LIKE '%' || ? ORDER BY validated DESC LIMIT 1",
-            (filename,)
+            (filename,),
         ).fetchone()
     if not row:
         return {"validated": False, "by": None, "at": None}
     return {"validated": bool(row[0]), "by": row[1], "at": row[2]}
-

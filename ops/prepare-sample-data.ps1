@@ -20,51 +20,51 @@ $totalCopied = 0
 
 foreach ($table in $tables) {
     Write-Host "Processing $table..." -ForegroundColor Yellow
-    
+
     $sourceTable = Join-Path $sourceBase "$table\sub_tables_images"
     $targetTable = Join-Path $targetBase "$table\sub_tables_images"
-    
+
     if (-not (Test-Path $sourceTable)) {
         Write-Host "  ⚠️ Source table not found: $sourceTable" -ForegroundColor Yellow
         continue
     }
-    
+
     # Create target directory structure
     New-Item -ItemType Directory -Path $targetTable -Force | Out-Null
     New-Item -ItemType Directory -Path "$targetTable\csv" -Force | Out-Null
     New-Item -ItemType Directory -Path "$targetTable\csv\latex" -Force | Out-Null
-    
+
     # Get sample images
     $images = Get-ChildItem "$sourceTable\*.png" | Select-Object -First $SampleSize
-    
+
     foreach ($image in $images) {
         # Copy image
         Copy-Item $image.FullName "$targetTable\"
-        
+
         # Copy corresponding CSV file
         $csvFile = Join-Path "$sourceTable\csv" ($image.BaseName + ".csv")
         if (Test-Path $csvFile) {
             Copy-Item $csvFile "$targetTable\csv\"
         }
-        
+
         # Copy corresponding PDF file
         $pdfFile = Join-Path "$sourceTable\csv\latex" ($image.BaseName + ".pdf")
         if (Test-Path $pdfFile) {
             Copy-Item $pdfFile "$targetTable\csv\latex\"
         }
-        
+
         $totalCopied++
     }
-    
+
     # Create empty validation database
     $validationDb = @{}
     foreach ($image in $images) {
         $validationDb[$image.Name] = $false
     }
-    
+
     $dbPath = Join-Path $targetTable "validation_db.json"
     $validationDb | ConvertTo-Json -Depth 2 | Out-File $dbPath -Encoding utf8
-    
+
     Write-Host "  ✅ Copied $($images.Count) images from $table" -ForegroundColor Green
 }
 
@@ -74,11 +74,11 @@ Write-Host "📊 Total sample images: $totalCopied" -ForegroundColor Cyan
 $dockerfileContent = Get-Content "Dockerfile" -Raw
 if ($dockerfileContent -notmatch "COPY data-sample") {
     Write-Host "📝 Updating Dockerfile to include sample data..." -ForegroundColor Yellow
-    
-    $newDockerfile = $dockerfileContent -replace 
+
+    $newDockerfile = $dockerfileContent -replace
         '# Create data directory for mounting\r\nRUN mkdir -p /app/data',
         "# Copy sample data for internet deployment`r`nCOPY data-sample/ /app/data/`r`n`r`n# Create data directory for mounting`r`nRUN mkdir -p /app/data-mount"
-    
+
     $newDockerfile | Out-File "Dockerfile" -Encoding utf8 -NoNewline
     Write-Host "✅ Dockerfile updated" -ForegroundColor Green
 }
