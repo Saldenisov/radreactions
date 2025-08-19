@@ -51,4 +51,3 @@ no_implicit_optional = true
 check_untyped_defs = true
 pretty = true
 exclude = ["data", "data-full", ".*ipynb_checkpoints.*"]
-
