@@ -45,3 +45,10 @@ users.db
 *.db
 *.sqlite
 *.sqlite3
+# SQLite journaling files
+*.db-wal
+*.db-shm
+
+# Validation JSON files (legacy, no longer tracked)
+**/validation_db.json
+**/*_validation_db.json
