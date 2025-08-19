@@ -25,7 +25,7 @@ Prerequisites: Python 3.11+, LaTeX/XeLaTeX
 
 ```
 pip install -r ops/requirements.txt
-streamlit run app/app.py
+streamlit run app/main_app.py
 ```
 
 The app auto‑discovers the dataset under `data-full`. Override with `BASE_DIR` if you keep data elsewhere.
