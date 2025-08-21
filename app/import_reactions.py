@@ -246,7 +246,7 @@ def sync_validations_to_db(table_numbers=(5, 6, 7, 8, 9), dry_run: bool = False)
         if not DB_JSON_PATH.exists():
             continue
         try:
-            from db_utils import load_db
+            from app.db_utils import load_db
 
             db = load_db(DB_JSON_PATH, IMAGE_DIR)
         except Exception as e:
@@ -306,7 +306,7 @@ def sync_validations_to_db(table_numbers=(5, 6, 7, 8, 9), dry_run: bool = False)
                 )
                 continue
             try:
-                from reactions_db import set_validated_by_source
+                from app.reactions_db import set_validated_by_source
 
                 updated = set_validated_by_source(con, str(source_path), is_valid, by=by, at_iso=at)
                 if updated == 0 and is_valid:

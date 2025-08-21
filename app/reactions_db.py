@@ -278,6 +278,8 @@ def get_or_create_reaction(
     category = TABLE_CATEGORY.get(table_no, str(table_no))
     canonical, reactants, products, r_species, p_species = latex_to_canonical(formula_latex)
     # dedup by table_no + canonical
+    # Canonicalize source path for consistent matching with validations
+    src_canon = canonicalize_source_path(source_path) if source_path else None
     row = con.execute(
         "SELECT id FROM reactions WHERE table_no = ? AND formula_canonical = ?",
         (table_no, canonical),
@@ -286,7 +288,7 @@ def get_or_create_reaction(
         rid = row[0]
         con.execute(
             "UPDATE reactions SET reaction_name = COALESCE(?, reaction_name), notes = COALESCE(?, notes), source_path = COALESCE(?, source_path), updated_at = datetime('now') WHERE id = ?",
-            (reaction_name, notes, source_path, rid),
+            (reaction_name, notes, src_canon, rid),
         )
         return rid
     cur = con.execute(
@@ -303,7 +305,7 @@ def get_or_create_reaction(
             json.dumps(r_species, ensure_ascii=False),
             json.dumps(p_species, ensure_ascii=False),
             notes,
-            source_path,
+            src_canon,
         ),
     )
     assert cur.lastrowid is not None
