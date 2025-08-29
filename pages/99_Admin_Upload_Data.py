@@ -289,6 +289,313 @@ def main():
 
     st.divider()
 
+    # Batch Search & Replace (Tables)
+    st.subheader("🔎 Batch Search & Replace (Tables)")
+
+    # Discover tables
+    if os.path.exists(BASE_DIR):
+        available_tables = [
+            d
+            for d in sorted(os.listdir(BASE_DIR))
+            if os.path.isdir(os.path.join(BASE_DIR, d)) and not d.startswith(".")
+        ]
+    else:
+        available_tables = []
+
+    if not available_tables:
+        st.info("No tables available. Upload data first.")
+    else:
+        col_scope1, col_scope2 = st.columns([2, 1])
+        with col_scope1:
+            table_for_fr = st.selectbox(
+                "Select table",
+                options=available_tables,
+                help="Choose a table folder to search & replace within",
+            )
+        with col_scope2:
+            auto_compile = st.checkbox(
+                "Compile after apply",
+                value=True,
+                help="After replacing, correct TSV and recompile LaTeX/PDF for affected files",
+            )
+
+        st.caption("Enter pattern and options, then run a dry scan. Review results and apply.")
+        col_in1, col_in2, col_in3 = st.columns([2, 2, 2])
+        with col_in1:
+            fr_find = st.text_input("Find", key="admin_fr_find", placeholder="e.g. .OH")
+        with col_in2:
+            fr_repl = st.text_input("Replace with", key="admin_fr_repl", placeholder="e.g. ^.OH")
+        with col_in3:
+            only_eq = st.checkbox(
+                "Only Reaction equation column",
+                value=False,
+                help="Limit replacements to the 3rd column (reaction equation)",
+            )
+        col_opt1, col_opt2 = st.columns([1, 1])
+        with col_opt1:
+            regex = st.checkbox("Regex", value=False)
+        with col_opt2:
+            case_sensitive = st.checkbox("Case sensitive", value=True)
+
+        def _compile_pat_admin(pat: str):
+            import re as _re
+
+            if not pat:
+                return None
+            flags = 0 if case_sensitive else _re.IGNORECASE
+            if regex:
+                try:
+                    return _re.compile(pat, flags)
+                except _re.error as e:
+                    st.warning(f"Invalid regex: {e}")
+                    return None
+            else:
+                return _re.compile(_re.escape(pat), flags)
+
+        res_key = f"admin_fr_results_{table_for_fr}"
+        sel_key = f"admin_fr_selected_{table_for_fr}"
+
+        col_btn1, col_btn2 = st.columns([1, 3])
+        with col_btn1:
+            if st.button("Dry scan", type="primary"):
+                try:
+                    from config import get_table_paths as _get_paths
+
+                    IMG_DIR, PDF_DIR, TSV_DIR, _ = _get_paths(table_for_fr)
+                except Exception as e:
+                    st.error(f"Path error: {e}")
+                    TSV_DIR = None
+                results: list[dict[str, object]] = []
+                pat = _compile_pat_admin(fr_find)
+                if TSV_DIR and pat:
+                    import re as _re
+
+                    images = sorted([p.name for p in IMG_DIR.glob("*.png")])
+                    for img in images:
+                        stem = Path(img).stem
+                        csv_p = TSV_DIR / f"{stem}.csv"
+                        if not csv_p.exists():
+                            continue
+                        try:
+                            text_i = csv_p.read_text(encoding="utf-8")
+                        except Exception:
+                            continue
+                        matches = 0
+                        new_text_i = text_i
+                        try:
+                            if only_eq:
+                                new_lines: list[str] = []
+                                for ln in text_i.split("\n"):
+                                    if not ln:
+                                        new_lines.append(ln)
+                                        continue
+                                    cols = ln.split("\t")
+                                    if len(cols) >= 3:
+                                        old = cols[2]
+                                        matches += len(list(pat.finditer(old)))
+                                        cols[2] = pat.sub(lambda _m: fr_repl, old)
+                                        ln = "\t".join(cols)
+                                    new_lines.append(ln)
+                                new_text_i = "\n".join(new_lines)
+                            else:
+                                matches = len(list(pat.finditer(text_i)))
+                                new_text_i = pat.sub(lambda _m: fr_repl, text_i)
+                        except _re.error as _e:
+                            st.warning(f"Regex error in {csv_p.name}: {_e}")
+                            continue
+                        if matches > 0 and new_text_i != text_i:
+                            results.append(
+                                {
+                                    "path": str(csv_p),
+                                    "file": csv_p.name,
+                                    "matches": matches,
+                                    "new": new_text_i,
+                                }
+                            )
+                st.session_state[res_key] = results
+                st.session_state[sel_key] = {r["path"] for r in results}
+        with col_btn2:
+            st.caption("Dry scan lists impacted files without changing anything.")
+
+        results2 = list(st.session_state.get(res_key, []))
+        if results2:
+            st.info(f"Found {len(results2)} files with matches in {table_for_fr}.")
+            # selection controls
+            sel_all_key = f"admin_fr_select_all_{table_for_fr}"
+            sel_set = set(st.session_state.get(sel_key, set()))
+            chk_all, _ = st.columns([1, 3])
+            with chk_all:
+                if st.checkbox("Select all", key=sel_all_key, value=True):
+                    sel_set = {r["path"] for r in results2}
+                else:
+                    pass
+            for r in results2:
+                p = str(r["path"])  # noqa: F722
+                fname = str(r["file"])  # noqa: F722
+                mcount = int(r["matches"])  # noqa: F722
+                ck = st.checkbox(
+                    f"{fname} — {mcount} matches",
+                    key=f"admin_fr_sel_{table_for_fr}_{fname}",
+                    value=(p in sel_set),
+                )
+                if ck:
+                    sel_set.add(p)
+                else:
+                    sel_set.discard(p)
+            st.session_state[sel_key] = sel_set
+
+            app1, app2 = st.columns([1, 1])
+            with app1:
+                if st.button("Apply to selected", type="secondary"):
+                    try:
+                        from pdf_utils import (
+                            compile_tex_to_pdf as compile_fn,
+                        )
+                        from pdf_utils import (
+                            tsv_to_full_latex_article as to_tex_fn,
+                        )
+                        from tsv_utils import correct_tsv_file as correct_fn
+
+                        have_tools = True
+                    except Exception as e:
+                        st.error(f"Import error: {e}")
+                        have_tools = False
+                    applied = 0
+                    for r in results2:
+                        p = str(r["path"])  # noqa: F722
+                        if p not in sel_set:
+                            continue
+                        new_text = str(r["new"])  # noqa: F722
+                        csv_p = Path(p)
+                        try:
+                            csv_p.write_text(new_text, encoding="utf-8")
+                            if have_tools:
+                                correct_fn(csv_p)
+                            if have_tools and auto_compile:
+                                lp = to_tex_fn(csv_p)
+                                compile_fn(lp)
+                            applied += 1
+                        except Exception as e:
+                            st.warning(f"Failed to update {csv_p.name}: {e}")
+                    st.success(f"Applied to {applied} files in {table_for_fr}.")
+            with app2:
+                if st.button("Apply to all", type="secondary"):
+                    try:
+                        from pdf_utils import (
+                            compile_tex_to_pdf as compile_fn,
+                        )
+                        from pdf_utils import (
+                            tsv_to_full_latex_article as to_tex_fn,
+                        )
+                        from tsv_utils import correct_tsv_file as correct_fn
+
+                        have_tools = True
+                    except Exception as e:
+                        st.error(f"Import error: {e}")
+                        have_tools = False
+                    applied = 0
+                    for r in results2:
+                        p = str(r["path"])  # noqa: F722
+                        new_text = str(r["new"])  # noqa: F722
+                        csv_p = Path(p)
+                        try:
+                            csv_p.write_text(new_text, encoding="utf-8")
+                            if have_tools:
+                                correct_fn(csv_p)
+                            if have_tools and auto_compile:
+                                lp = to_tex_fn(csv_p)
+                                compile_fn(lp)
+                            applied += 1
+                        except Exception as e:
+                            st.warning(f"Failed to update {csv_p.name}: {e}")
+                    st.success(f"Applied to {applied} files in {table_for_fr}.")
+
+        st.markdown("---")
+        st.markdown("**Quick Fix: Replace .OH → ^.OH in Reaction equation (entire table)**")
+        qf_col1, qf_col2 = st.columns([1, 1])
+        with qf_col1:
+            if st.button("Dry scan quick fix"):
+                try:
+                    from config import get_table_paths as _get_paths
+
+                    IMG_DIR, PDF_DIR, TSV_DIR, _ = _get_paths(table_for_fr)
+                except Exception as e:
+                    st.error(f"Path error: {e}")
+                    TSV_DIR = None
+                results_qf: list[dict[str, object]] = []
+                if TSV_DIR:
+                    images = sorted([p.name for p in IMG_DIR.glob("*.png")])
+                    for img in images:
+                        stem = Path(img).stem
+                        csv_p = TSV_DIR / f"{stem}.csv"
+                        if not csv_p.exists():
+                            continue
+                        try:
+                            text_i = csv_p.read_text(encoding="utf-8")
+                        except Exception:
+                            continue
+                        matches = 0
+                        new_lines_qf: list[str] = []
+                        for ln in text_i.split("\n"):
+                            if not ln:
+                                new_lines_qf.append(ln)
+                                continue
+                            cols = ln.split("\t")
+                            if len(cols) >= 3:
+                                old = cols[2]
+                                cnt = old.count(".OH")
+                                if cnt:
+                                    matches += cnt
+                                    cols[2] = old.replace(".OH", "^.OH")
+                                    ln = "\t".join(cols)
+                            new_lines_qf.append(ln)
+                        if matches > 0:
+                            results_qf.append(
+                                {
+                                    "path": str(csv_p),
+                                    "file": csv_p.name,
+                                    "matches": matches,
+                                    "new": "\n".join(new_lines_qf),
+                                }
+                            )
+                st.session_state[res_key] = results_qf
+                st.session_state[sel_key] = {r["path"] for r in results_qf}
+        with qf_col2:
+            if st.button("Apply quick fix to all"):
+                res_qf2 = list(st.session_state.get(res_key, []))
+                if not res_qf2:
+                    st.info("No scanned results. Click 'Dry scan quick fix' first.")
+                else:
+                    try:
+                        from pdf_utils import (
+                            compile_tex_to_pdf as compile_fn,
+                        )
+                        from pdf_utils import (
+                            tsv_to_full_latex_article as to_tex_fn,
+                        )
+                        from tsv_utils import correct_tsv_file as correct_fn
+
+                        have_tools = True
+                    except Exception as e:
+                        st.error(f"Import error: {e}")
+                        have_tools = False
+                    applied = 0
+                    for r in res_qf2:
+                        p = str(r["path"])  # noqa: F722
+                        new_text = str(r["new"])  # noqa: F722
+                        csv_p = Path(p)
+                        try:
+                            csv_p.write_text(new_text, encoding="utf-8")
+                            if have_tools:
+                                correct_fn(csv_p)
+                            if have_tools and auto_compile:
+                                lp = to_tex_fn(csv_p)
+                                compile_fn(lp)
+                            applied += 1
+                        except Exception as e:
+                            st.warning(f"Failed to update {csv_p.name}: {e}")
+                    st.success(f"Quick fix applied to {applied} files in {table_for_fr}.")
+
     # Export section - placed before delete for better workflow
     st.subheader("📥 Export Table Data")
 
