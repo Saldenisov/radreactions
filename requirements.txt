@@ -1,0 +1,15 @@
+streamlit>=1.38.0
+pillow
+pymupdf
+python-dotenv
+pandas
+# database
+sqlite-utils
+# optional: scientific parsing
+regex
+# type hints
+typing-extensions
+# auth (if used by app)
+passlib[bcrypt]
+# dev
+ruff

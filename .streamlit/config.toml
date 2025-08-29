@@ -1,0 +1,11 @@
+[server]
+# Allow large file uploads (250MB+ for data zip files)
+maxUploadSize = 500
+
+[client]
+# Disable usage stats collection
+gatherUsageStats = false
+
+[browser]
+# Disable stats collection
+gatherUsageStats = false

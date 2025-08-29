@@ -1,0 +1,25 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage{booktabs}
+\usepackage[version=4]{mhchem}
+\usepackage{pdflscape}
+\usepackage{geometry}
+\geometry{margin=1cm}
+
+\begin{document}
+\begin{landscape}
+\begin{table}[htbp]
+\centering
+\footnotesize
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{lp{5cm}p{6cm}llp{8cm}l}
+\toprule
+No. & Compound name & Reaction equation & pH & \parbox{3.5cm}{\centering Rate constant\\ (L\,mol$^{-1}$\,s$^{-1}$)} & Comments & Reference \\
+\midrule
+81 & Hexamethylbenzene & \ce{O^{. -} + C6(CH3)6 -> OH^- + C6(CH3)5(C^{.}H2)} & 13 & $\sim 2.5 \times 10^9$ & p.r.; P.b.k. at 270 nm in \\ce{N2O}-satd. soln. contg. 0.5 mol L$^{-1}$ NaOH. & 751009 \\
+\bottomrule
+\end{tabular}
+%\caption{Kinetic data table}
+%\label{tab:kinetics}
+\end{table}
+\end{landscape}
+\end{document}

@@ -1,0 +1,60 @@
+# See https://pre-commit.com for usage
+# Install: pip install pre-commit \&\& pre-commit install
+# Run on all files: pre-commit run --all-files
+
+# Global excludes for large data and generated content
+# Note: git uses forward slashes for paths even on Windows
+exclude: |
+  ^(
+    data-full/|
+    data/|
+    .*\.(ipynb_checkpoints)/|
+    .*\.parquet$|
+    .*\.feather$|
+    .*\.pickle$|
+    .*\.pkl$|
+    .*\.h5$|
+    .*\.hdf5$|
+    .*\.sqlite$|
+    .*\.db$
+  )
+
+repos:
+  # General hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+        exclude: ^(data-full/|data/)
+      - id: end-of-file-fixer
+        exclude: ^(data-full/|data/)
+      - id: trailing-whitespace
+        exclude: ^(data-full/|data/)
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+      - id: check-case-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+        exclude: ^(data-full/|data/)
+
+  # Ruff: fast lint + format (also sorts imports)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.12.9
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+        files: \.(py|pyi)$
+      - id: ruff-format
+        files: \.(py|pyi)$
+
+  # MyPy: static type checking
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.17.1
+    hooks:
+      - id: mypy
+        additional_dependencies: ["types-requests", "types-PyYAML"]
+        args:
+          - --ignore-missing-imports
+          - --show-error-codes
+          - --pretty
+        files: \.(py|pyi)$

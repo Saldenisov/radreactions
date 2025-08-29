@@ -1,0 +1,51 @@
+# RadReactions
+
+An open platform for curated radiation radical reaction data.
+
+RadReactions digitizes, curates, validates, and publishes rate constants for aqueous radical reactions, initially derived from the Buxton Critical Review (DOI: 10.1063/1.555805). It provides:
+- A Streamlit application for collaborative validation over table images
+- A normalized SQLite database with full‑text search (FTS5)
+- Reproducible artifacts (TSV, LaTeX, PDF) generated from source tables
+
+## What’s in this repo
+- app/: Streamlit UI, data import, database access, utilities
+- data-full/: Versioned dataset (images, CSV/TSV, LaTeX/PDF, validation_db.json) — tracked via Git LFS
+- ops/: Deployment and operations (Dockerfile, Compose, Railway config, scripts)
+
+## Key features
+- End‑to‑end pipeline: images → TSV → LaTeX → PDF → SQLite
+- Collaborative validation tracked per image (validation_db.json)
+- Idempotent TSV imports that keep the DB in sync
+- Canonicalization of reaction formulas for robust search/deduplication
+- Fast FTS search by name/formula/notes across tables 5–9
+- Transparent provenance: each reaction references its source file
+
+## Quick start (local)
+Prerequisites: Python 3.11+, LaTeX/XeLaTeX
+
+```
+pip install -r ops/requirements.txt
+streamlit run app/main_app.py
+```
+
+The app auto‑discovers the dataset under `data-full`. Override with `BASE_DIR` if you keep data elsewhere.
+
+## Deploy
+See ops/README.md for Docker and Railway deployment.
+
+## Data model (high level)
+- reactions: table number, category, canonical/latex formula, name/notes, source path, validation metadata
+- measurements: pH, temperature, rate (raw and parsed), units, method/conditions, reference link
+- references_map: Buxton codes and DOIs
+
+## Roadmap (suggested)
+- DOI resolution and status enrichment
+- Expand beyond tables 5–9
+- Public API for programmatic queries
+- Provenance and versioned DB releases
+
+## Acknowledgements
+Inspired by Buxton’s Critical Review of rate constants for hydrated electrons, hydrogen atoms, hydroxyl radicals, and oxide radical ion in aqueous solution.
+
+## License
+Choose and declare a license (e.g., MIT/Apache‑2.0). If data licensing differs from code, document both.

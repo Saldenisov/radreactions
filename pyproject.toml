@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "radreactions"
+version = "0.0.0"
+description = "RadReactions project"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+[tool.ruff]
+line-length = 100
+# Enable pycodestyle (E), Pyflakes (F), isort (I), and some flake8 plugins
+lint.select = [
+  "E","F","I","UP","B","C4","Q","SIM","TCH","PLC","PLE","PLW"
+]
+# Common ignores; we can tune later
+lint.ignore = [
+  "E203",  # whitespace before ':' (black/ruff formatting compat)
+  "E266",  # too many leading '#' for block comment
+  "E501",  # line length handled by formatter
+  "E402",  # module level import at top (streamlit patterns)
+  "PLC0415",  # imports not at top-level (runtime imports in UI)
+  "PLW2901",  # loop variable overwritten (acceptable in parsing loops)
+  "C416",  # unnecessary list comprehension (readability)
+  "C414",  # unnecessary list() in sorted (clarity)
+  "UP031",  # prefer f-strings over % formatting (allow legacy)
+  "SIM105",  # suggest contextlib.suppress (explicit try/except ok)
+  "SIM108",  # suggest ternary (explicit blocks ok)
+  "SIM117",  # combine with statements (nesting ok for clarity)
+]
+# Avoid traversing heavy folders
+exclude = [
+  "data", "data-full", "**/.ipynb_checkpoints/**"
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+no_implicit_optional = true
+check_untyped_defs = true
+pretty = true
+# Avoid duplicate module name mapping when the repository root is a package (has __init__.py)
+# This ensures files are mapped based on their package base (e.g., 'radreactions.tsv_utils'),
+# not also as top-level modules.
+explicit_package_bases = true
+exclude = ["data", "data-full", ".*ipynb_checkpoints.*"]

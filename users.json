@@ -1,0 +1,38 @@
+{
+  "saldenisov": {
+    "password": "$2b$12$txcadpJWo0kLbr7PDWvq/OU3g87.EajgnT.RuGXOETpOsi9c2QQO.",
+    "email": "",
+    "contact_info": {
+      "phone": "",
+      "department": "",
+      "institution": ""
+    },
+    "created_at": "2025-08-22T22:25:15.825709",
+    "last_login": null,
+    "password_changed": false
+  },
+  "zhiwenjiang": {
+    "password": "$2b$12$sUTvOl/3k4.0.YJKG20Pj.EAIec.UZJeOS9B7sbsg/LGq6tXuk66m",
+    "email": "",
+    "contact_info": {
+      "phone": "",
+      "department": "",
+      "institution": ""
+    },
+    "created_at": "2025-08-22T22:25:16.063341",
+    "last_login": null,
+    "password_changed": false
+  },
+  "jplarbre": {
+    "password": "$2b$12$Cs0xvUb4x2yqx9T09P5SuO.D6NpImkqQUNLiTLK2I9rk/JV4i/J3a",
+    "email": "",
+    "contact_info": {
+      "phone": "",
+      "department": "",
+      "institution": ""
+    },
+    "created_at": "2025-08-22T22:25:16.308115",
+    "last_login": null,
+    "password_changed": false
+  }
+}

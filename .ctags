@@ -1,0 +1,5 @@
+--exclude=*.png
+--exclude=*.csv
+--exclude=**/csv/*
+--exclude=**/data-full/*
+--exclude=.git
