@@ -419,30 +419,95 @@ def main():
 
         results2 = list(st.session_state.get(res_key, []))
         if results2:
-            st.info(f"Found {len(results2)} files with matches in {table_for_fr}.")
+            total_found = len(results2)
+            st.info(f"Found {total_found} files with matches in {table_for_fr}.")
+
+            # Pagination (20 per page)
+            PAGE_SIZE = 20
+            page_key = f"admin_fr_page_{table_for_fr}"
+            if page_key not in st.session_state:
+                st.session_state[page_key] = 0
+            total_pages = max(1, (total_found + PAGE_SIZE - 1) // PAGE_SIZE)
+            # Clamp
+            st.session_state[page_key] = max(0, min(st.session_state[page_key], total_pages - 1))
+            cur_page = st.session_state[page_key]
+            start_idx = cur_page * PAGE_SIZE
+            end_idx = min(start_idx + PAGE_SIZE, total_found)
+            page_results = results2[start_idx:end_idx]
+
+            # Page controls
+            pc1, pc2, pc3 = st.columns([1, 2, 1])
+            with pc1:
+                if st.button("◀ Prev", disabled=(cur_page == 0)):
+                    st.session_state[page_key] = max(0, cur_page - 1)
+                    st.rerun()
+            with pc2:
+                st.write(f"Page {cur_page + 1}/{total_pages}  ")
+                st.caption(f"Showing {start_idx + 1}-{end_idx} of {total_found}")
+            with pc3:
+                if st.button("Next ▶", disabled=(cur_page >= total_pages - 1)):
+                    st.session_state[page_key] = min(total_pages - 1, cur_page + 1)
+                    st.rerun()
+
             # selection controls
             sel_all_key = f"admin_fr_select_all_{table_for_fr}"
             sel_set = set(st.session_state.get(sel_key, set()))
             chk_all, _ = st.columns([1, 3])
             with chk_all:
-                if st.checkbox("Select all", key=sel_all_key, value=True):
+                if st.checkbox("Select all (all pages)", key=sel_all_key, value=True):
                     sel_set = {r["path"] for r in results2}
                 else:
                     pass
-            for r in results2:
+
+            # Per-file checkboxes (current page), with CSV preview on click (expander)
+            for r in page_results:
                 p = str(r["path"])  # noqa: F722
                 fname = str(r["file"])  # noqa: F722
                 mcount = int(r["matches"])  # noqa: F722
-                ck = st.checkbox(
-                    f"{fname} — {mcount} matches",
-                    key=f"admin_fr_sel_{table_for_fr}_{fname}",
-                    value=(p in sel_set),
-                )
-                if ck:
-                    sel_set.add(p)
-                else:
-                    sel_set.discard(p)
+                row_cols = st.columns([1, 3])
+                with row_cols[0]:
+                    ck = st.checkbox(
+                        "Select",
+                        key=f"admin_fr_sel_{table_for_fr}_{fname}",
+                        value=(p in sel_set),
+                    )
+                    if ck:
+                        sel_set.add(p)
+                    else:
+                        sel_set.discard(p)
+                with row_cols[1]:
+                    with st.expander(f"{fname} — {mcount} matches (click to view CSV)"):
+                        try:
+                            csv_text = Path(p).read_text(encoding="utf-8")
+                        except Exception as e:
+                            csv_text = f"<error reading file: {e}>"
+                        st.code(csv_text, language="text")
             st.session_state[sel_key] = sel_set
+
+            # Parallel options
+            opt1, opt2 = st.columns([1, 1])
+            with opt1:
+                run_parallel = st.checkbox(
+                    "Run in parallel", value=True, key=f"admin_fr_parallel_{table_for_fr}"
+                )
+            with opt2:
+                if run_parallel:
+                    try:
+                        import os as _os_mod
+
+                        default_workers = _os_mod.cpu_count() or 4
+                    except Exception:
+                        default_workers = 4
+                    workers = st.number_input(
+                        "Workers",
+                        min_value=1,
+                        max_value=64,
+                        value=int(default_workers),
+                        step=1,
+                        key=f"admin_fr_workers_{table_for_fr}",
+                    )
+                else:
+                    workers = 1
 
             app1, app2 = st.columns([1, 1])
             with app1:
@@ -460,24 +525,66 @@ def main():
                     except Exception as e:
                         st.error(f"Import error: {e}")
                         have_tools = False
+
+                    # Prepare tasks
+                    tasks = [
+                        (str(r["path"]), str(r["new"]))
+                        for r in results2
+                        if str(r["path"]) in sel_set
+                    ]
                     applied = 0
-                    for r in results2:
-                        p = str(r["path"])  # noqa: F722
-                        if p not in sel_set:
-                            continue
-                        new_text = str(r["new"])  # noqa: F722
-                        csv_p = Path(p)
+                    logs = []
+
+                    def _apply_one(_p: str, _new: str):
+                        _csvp = Path(_p)
                         try:
-                            csv_p.write_text(new_text, encoding="utf-8")
+                            _csvp.write_text(_new, encoding="utf-8")
                             if have_tools:
-                                correct_fn(csv_p)
+                                correct_fn(_csvp)
                             if have_tools and auto_compile:
-                                lp = to_tex_fn(csv_p)
+                                lp = to_tex_fn(_csvp)
                                 compile_fn(lp)
-                            applied += 1
+                            return True, ""
+                        except Exception as _e:
+                            return False, f"Failed {Path(_p).name}: {_e}"
+
+                    if run_parallel and workers > 1 and tasks:
+                        try:
+                            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                            with ThreadPoolExecutor(max_workers=int(workers)) as ex:
+                                futs = {
+                                    ex.submit(_apply_one, pth, new): (pth, new)
+                                    for (pth, new) in tasks
+                                }
+                                for ft in as_completed(futs):
+                                    ok, msg = ft.result()
+                                    if ok:
+                                        applied += 1
+                                    elif msg:
+                                        logs.append(msg)
                         except Exception as e:
-                            st.warning(f"Failed to update {csv_p.name}: {e}")
+                            logs.append(f"Parallel execution error: {e}")
+                            # fallback sequential
+                            for pth, new in tasks:
+                                ok, msg = _apply_one(pth, new)
+                                if ok:
+                                    applied += 1
+                                elif msg:
+                                    logs.append(msg)
+                    else:
+                        for pth, new in tasks:
+                            ok, msg = _apply_one(pth, new)
+                            if ok:
+                                applied += 1
+                            elif msg:
+                                logs.append(msg)
+
+                    if logs:
+                        with st.expander("Show errors/logs", expanded=False):
+                            st.code("\n".join(logs), language="text")
                     st.success(f"Applied to {applied} files in {table_for_fr}.")
+                    st.rerun()
             with app2:
                 if st.button("Apply to all", type="secondary"):
                     try:
@@ -493,22 +600,60 @@ def main():
                     except Exception as e:
                         st.error(f"Import error: {e}")
                         have_tools = False
+
+                    tasks = [(str(r["path"]), str(r["new"])) for r in results2]
                     applied = 0
-                    for r in results2:
-                        p = str(r["path"])  # noqa: F722
-                        new_text = str(r["new"])  # noqa: F722
-                        csv_p = Path(p)
+                    logs = []
+
+                    def _apply_one(_p: str, _new: str):
+                        _csvp = Path(_p)
                         try:
-                            csv_p.write_text(new_text, encoding="utf-8")
+                            _csvp.write_text(_new, encoding="utf-8")
                             if have_tools:
-                                correct_fn(csv_p)
+                                correct_fn(_csvp)
                             if have_tools and auto_compile:
-                                lp = to_tex_fn(csv_p)
+                                lp = to_tex_fn(_csvp)
                                 compile_fn(lp)
-                            applied += 1
+                            return True, ""
+                        except Exception as _e:
+                            return False, f"Failed {Path(_p).name}: {_e}"
+
+                    if run_parallel and workers > 1 and tasks:
+                        try:
+                            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                            with ThreadPoolExecutor(max_workers=int(workers)) as ex:
+                                futs = {
+                                    ex.submit(_apply_one, pth, new): (pth, new)
+                                    for (pth, new) in tasks
+                                }
+                                for ft in as_completed(futs):
+                                    ok, msg = ft.result()
+                                    if ok:
+                                        applied += 1
+                                    elif msg:
+                                        logs.append(msg)
                         except Exception as e:
-                            st.warning(f"Failed to update {csv_p.name}: {e}")
+                            logs.append(f"Parallel execution error: {e}")
+                            for pth, new in tasks:
+                                ok, msg = _apply_one(pth, new)
+                                if ok:
+                                    applied += 1
+                                elif msg:
+                                    logs.append(msg)
+                    else:
+                        for pth, new in tasks:
+                            ok, msg = _apply_one(pth, new)
+                            if ok:
+                                applied += 1
+                            elif msg:
+                                logs.append(msg)
+
+                    if logs:
+                        with st.expander("Show errors/logs", expanded=False):
+                            st.code("\n".join(logs), language="text")
                     st.success(f"Applied to {applied} files in {table_for_fr}.")
+                    st.rerun()
 
         st.markdown("---")
         st.markdown("**Quick Fix: Replace .OH → ^.OH in Reaction equation (entire table)**")
@@ -579,21 +724,62 @@ def main():
                     except Exception as e:
                         st.error(f"Import error: {e}")
                         have_tools = False
+
+                    # Parallel options reuse
+                    run_parallel = st.session_state.get(f"admin_fr_parallel_{table_for_fr}", True)
+                    workers = int(st.session_state.get(f"admin_fr_workers_{table_for_fr}", 4))
+
+                    tasks = [(str(r["path"]), str(r["new"])) for r in res_qf2]
                     applied = 0
-                    for r in res_qf2:
-                        p = str(r["path"])  # noqa: F722
-                        new_text = str(r["new"])  # noqa: F722
-                        csv_p = Path(p)
+                    logs = []
+
+                    def _apply_one(_p: str, _new: str):
+                        _csvp = Path(_p)
                         try:
-                            csv_p.write_text(new_text, encoding="utf-8")
+                            _csvp.write_text(_new, encoding="utf-8")
                             if have_tools:
-                                correct_fn(csv_p)
+                                correct_fn(_csvp)
                             if have_tools and auto_compile:
-                                lp = to_tex_fn(csv_p)
+                                lp = to_tex_fn(_csvp)
                                 compile_fn(lp)
-                            applied += 1
+                            return True, ""
+                        except Exception as _e:
+                            return False, f"Failed {Path(_p).name}: {_e}"
+
+                    if run_parallel and workers > 1 and tasks:
+                        try:
+                            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                            with ThreadPoolExecutor(max_workers=int(workers)) as ex:
+                                futs = {
+                                    ex.submit(_apply_one, pth, new): (pth, new)
+                                    for (pth, new) in tasks
+                                }
+                                for ft in as_completed(futs):
+                                    ok, msg = ft.result()
+                                    if ok:
+                                        applied += 1
+                                    elif msg:
+                                        logs.append(msg)
                         except Exception as e:
-                            st.warning(f"Failed to update {csv_p.name}: {e}")
+                            logs.append(f"Parallel execution error: {e}")
+                            for pth, new in tasks:
+                                ok, msg = _apply_one(pth, new)
+                                if ok:
+                                    applied += 1
+                                elif msg:
+                                    logs.append(msg)
+                    else:
+                        for pth, new in tasks:
+                            ok, msg = _apply_one(pth, new)
+                            if ok:
+                                applied += 1
+                            elif msg:
+                                logs.append(msg)
+
+                    if logs:
+                        with st.expander("Show errors/logs", expanded=False):
+                            st.code("\n".join(logs), language="text")
                     st.success(f"Quick fix applied to {applied} files in {table_for_fr}.")
 
     # Export section - placed before delete for better workflow
