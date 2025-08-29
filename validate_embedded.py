@@ -1174,6 +1174,307 @@ def show_validation_interface(current_user):
                             st.success("Replacements applied; TSV saved and recompiled.")
                         st.rerun()
 
+            # --- Quick Fix: .OH -> ^.OH in Reaction equation (this TSV) ---
+            st.divider()
+            st.markdown("**Quick Fix: .OH → ^.OH in Reaction equation (this TSV)**")
+
+            def _quick_fix_visible_eq_only(_visible: str) -> str:
+                lines = _visible.split("\n")
+                fixed_lines: list[str] = []
+                for ln in lines:
+                    parts = ln.split("→")
+                    if len(parts) >= 3:
+                        parts[2] = parts[2].replace(".OH", "^.OH")
+                        ln = "→".join(parts)
+                    fixed_lines.append(ln)
+                return "\n".join(fixed_lines)
+
+            qf1, qf2 = st.columns([1, 2])
+            with qf1:
+                if st.button("Fix in editor (this TSV)", key=f"qf_eq_editor_{current_image}"):
+                    base_text2 = st.session_state.get(session_key, edited_visible)
+                    st.session_state[session_key] = _quick_fix_visible_eq_only(base_text2)
+                    st.success("Applied quick fix in editor content.")
+                    st.rerun()
+            with qf2:
+                if st.button(
+                    "Fix + Save & Recompile (this TSV)", key=f"qf_eq_save_compile_{current_image}"
+                ):
+                    base_text2 = st.session_state.get(session_key, edited_visible)
+                    fixed_visible = _quick_fix_visible_eq_only(base_text2)
+                    # Save to TSV, correct, and recompile
+                    edited_tsv3 = visible_to_tsv(fixed_visible, tab_symbol=tab_symbol)
+                    tsv_path.write_text(edited_tsv3, encoding="utf-8")
+                    corrected_tsv_text3 = correct_tsv_file(tsv_path)
+                    st.session_state[session_key] = tsv_to_visible(
+                        corrected_tsv_text3, tab_symbol=tab_symbol
+                    )
+                    latex_path3 = tsv_to_full_latex_article(tsv_path)
+                    try:
+                        st.session_state[f"edited_latex_{current_image}"] = latex_path3.read_text(
+                            encoding="utf-8"
+                        )
+                    except Exception:
+                        pass
+                    rc3, out3 = compile_tex_to_pdf(latex_path3)
+                    if rc3 != 0:
+                        st.error(f"Compilation failed:\n{out3}")
+                    else:
+                        st.success("Quick fix applied, TSV saved and recompiled.")
+                    st.rerun()
+
+            # --- Batch Find & Replace across current table ---
+            st.divider()
+            with st.expander("Batch Find & Replace across current table", expanded=False):
+                st.caption(
+                    "Scan all CSV files in the selected table, preview matches, and apply replacements."
+                )
+                col_a, col_b, col_c = st.columns([2, 2, 2])
+                with col_a:
+                    st.text_input(
+                        "Find",
+                        key=f"bat_fr_find_{table_choice}",
+                        placeholder="e.g. .OH",
+                    )
+                with col_b:
+                    st.text_input(
+                        "Replace with",
+                        key=f"bat_fr_repl_{table_choice}",
+                        placeholder="e.g. ^.OH",
+                    )
+                with col_c:
+                    only_eq = st.checkbox(
+                        "Only Reaction equation column",
+                        key=f"bat_fr_onlyeq_{table_choice}",
+                        value=False,
+                    )
+                col_d, col_e = st.columns([1, 1])
+                with col_d:
+                    bat_regex = st.checkbox(
+                        "Regex",
+                        key=f"bat_fr_regex_{table_choice}",
+                        value=False,
+                    )
+                with col_e:
+                    bat_case = st.checkbox(
+                        "Case sensitive",
+                        key=f"bat_fr_case_{table_choice}",
+                        value=True,
+                    )
+
+                def _compile_pat_bat(pat: str):
+                    if not pat:
+                        return None
+                    flags = 0 if bat_case else re.IGNORECASE
+                    if bat_regex:
+                        try:
+                            return re.compile(pat, flags)
+                        except re.error as e:
+                            st.warning(f"Invalid regex: {e}")
+                            return None
+                    else:
+                        return re.compile(re.escape(pat), flags)
+
+                # Storage for scan results in session
+                res_key = f"bat_fr_results_{table_choice}"
+                sel_key = f"bat_fr_selected_{table_choice}"
+
+                s1, s2 = st.columns([1, 1])
+                with s1:
+                    if st.button("Scan table", key=f"bat_fr_scan_{table_choice}"):
+                        pat = _compile_pat_bat(
+                            st.session_state.get(f"bat_fr_find_{table_choice}", "")
+                        )
+                        repl = st.session_state.get(f"bat_fr_repl_{table_choice}", "")
+                        results: list[dict[str, object]] = []
+                        if pat:
+                            for img_name in images_all:
+                                stem_i = Path(img_name).stem
+                                csv_i = TSV_DIR / f"{stem_i}.csv"
+                                if not csv_i.exists():
+                                    continue
+                                try:
+                                    text_i = csv_i.read_text(encoding="utf-8")
+                                except Exception:
+                                    continue
+                                matches = 0
+                                new_text_i = text_i
+                                try:
+                                    if only_eq:
+                                        # Replace only in 3rd column (0-based idx 2)
+                                        new_lines: list[str] = []
+                                        for ln in text_i.split("\n"):
+                                            if not ln:
+                                                new_lines.append(ln)
+                                                continue
+                                            cols = ln.split("\t")
+                                            if len(cols) >= 3:
+                                                old = cols[2]
+                                                matches += len(list(pat.finditer(old)))
+                                                cols[2] = pat.sub(lambda _m: repl, old)
+                                                ln = "\t".join(cols)
+                                            new_lines.append(ln)
+                                        new_text_i = "\n".join(new_lines)
+                                    else:
+                                        matches = len(list(pat.finditer(text_i)))
+                                        new_text_i = pat.sub(lambda _m: repl, text_i)
+                                except re.error as e:
+                                    st.warning(f"Regex error in {csv_i.name}: {e}")
+                                    continue
+                                if matches > 0 and new_text_i != text_i:
+                                    results.append(
+                                        {
+                                            "path": str(csv_i),
+                                            "file": csv_i.name,
+                                            "matches": matches,
+                                            "new": new_text_i,
+                                        }
+                                    )
+                            st.session_state[res_key] = results
+                            # Default select all
+                            st.session_state[sel_key] = {r["path"] for r in results}
+                with s2:
+                    auto_compile = st.checkbox(
+                        "Compile after apply",
+                        key=f"bat_fr_compile_{table_choice}",
+                        value=True,
+                    )
+
+                results2 = list(st.session_state.get(res_key, []))
+                if results2:
+                    st.info(f"Found {len(results2)} files with matches.")
+                    # Controls for selection
+                    all_key = f"bat_fr_select_all_{table_choice}"
+                    sel_set = set(st.session_state.get(sel_key, set()))
+                    c_all, _ = st.columns([1, 3])
+                    with c_all:
+                        if st.checkbox("Select all", key=all_key, value=True):
+                            sel_set = {r["path"] for r in results2}
+                        else:
+                            # Keep whatever previous selection was
+                            pass
+                    # Per-file checkboxes
+                    for r in results2:
+                        p = str(r["path"])  # noqa: F722
+                        fname = str(r["file"])  # noqa: F722
+                        mcount = int(r["matches"])  # noqa: F722
+                        ck = st.checkbox(
+                            f"{fname} — {mcount} matches",
+                            key=f"bat_fr_sel_{table_choice}_{fname}",
+                            value=(p in sel_set),
+                        )
+                        if ck:
+                            sel_set.add(p)
+                        else:
+                            sel_set.discard(p)
+                    st.session_state[sel_key] = sel_set
+
+                    a1, a2 = st.columns([1, 1])
+                    with a1:
+                        if st.button("Apply to selected", key=f"bat_fr_apply_sel_{table_choice}"):
+                            applied = 0
+                            for r in results2:
+                                p = str(r["path"])  # noqa: F722
+                                if p not in sel_set:
+                                    continue
+                                new_text = str(r["new"])  # noqa: F722
+                                csv_p = Path(p)
+                                try:
+                                    csv_p.write_text(new_text, encoding="utf-8")
+                                    # Correct TSV
+                                    correct_tsv_file(csv_p)
+                                    if auto_compile:
+                                        lp = tsv_to_full_latex_article(csv_p)
+                                        compile_tex_to_pdf(lp)
+                                    applied += 1
+                                except Exception as e:
+                                    st.warning(f"Failed to update {csv_p.name}: {e}")
+                            st.success(f"Applied to {applied} files.")
+                            st.rerun()
+                    with a2:
+                        if st.button("Apply to all", key=f"bat_fr_apply_all_{table_choice}"):
+                            applied = 0
+                            for r in results2:
+                                p = str(r["path"])  # noqa: F722
+                                new_text = str(r["new"])  # noqa: F722
+                                csv_p = Path(p)
+                                try:
+                                    csv_p.write_text(new_text, encoding="utf-8")
+                                    correct_tsv_file(csv_p)
+                                    if auto_compile:
+                                        lp = tsv_to_full_latex_article(csv_p)
+                                        compile_tex_to_pdf(lp)
+                                    applied += 1
+                                except Exception as e:
+                                    st.warning(f"Failed to update {csv_p.name}: {e}")
+                            st.success(f"Applied to {applied} files.")
+                            st.rerun()
+
+                st.markdown("---")
+                st.markdown("**Quick Fix across table: Reaction equation .OH → ^.OH**")
+                qfb1, qfb2 = st.columns([1, 1])
+                with qfb1:
+                    if st.button("Scan quick fix", key=f"bat_qf_scan_{table_choice}"):
+                        # Pre-configure results using quick fix in eq only
+                        results_qf: list[dict[str, object]] = []
+                        for img_name in images_all:
+                            stem_i = Path(img_name).stem
+                            csv_i = TSV_DIR / f"{stem_i}.csv"
+                            if not csv_i.exists():
+                                continue
+                            try:
+                                text_i = csv_i.read_text(encoding="utf-8")
+                            except Exception:
+                                continue
+                            matches = 0
+                            new_lines2: list[str] = []
+                            for ln in text_i.split("\n"):
+                                if not ln:
+                                    new_lines2.append(ln)
+                                    continue
+                                cols = ln.split("\t")
+                                if len(cols) >= 3:
+                                    old = cols[2]
+                                    cnt = old.count(".OH")
+                                    if cnt:
+                                        matches += cnt
+                                        cols[2] = old.replace(".OH", "^.OH")
+                                        ln = "\t".join(cols)
+                                new_lines2.append(ln)
+                            if matches > 0:
+                                results_qf.append(
+                                    {
+                                        "path": str(csv_i),
+                                        "file": csv_i.name,
+                                        "matches": matches,
+                                        "new": "\n".join(new_lines2),
+                                    }
+                                )
+                        st.session_state[res_key] = results_qf
+                        st.session_state[sel_key] = {r["path"] for r in results_qf}
+                with qfb2:
+                    if st.button("Apply quick fix to all", key=f"bat_qf_apply_all_{table_choice}"):
+                        res_qf2 = list(st.session_state.get(res_key, []))
+                        if not res_qf2:
+                            st.info("No scanned results. Click 'Scan quick fix' first.")
+                        else:
+                            applied = 0
+                            for r in res_qf2:
+                                p = str(r["path"])  # noqa: F722
+                                new_text = str(r["new"])  # noqa: F722
+                                csv_p = Path(p)
+                                try:
+                                    csv_p.write_text(new_text, encoding="utf-8")
+                                    correct_tsv_file(csv_p)
+                                    if auto_compile:
+                                        lp = tsv_to_full_latex_article(csv_p)
+                                        compile_tex_to_pdf(lp)
+                                    applied += 1
+                                except Exception as e:
+                                    st.warning(f"Failed to update {csv_p.name}: {e}")
+                            st.success(f"Quick fix applied to {applied} files.")
+                            st.rerun()
+
     # === LaTeX TAB ===
     with tab3:
         st.header("Edit LaTeX")
