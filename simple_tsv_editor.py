@@ -127,7 +127,7 @@ def dict_list_to_df_format(data: list[dict[str, str]]) -> dict[str, Any]:
         return {col: [] for col in standard_columns}
 
     # Get all columns from data
-    all_columns = set()
+    all_columns: set[str] = set()
     for row in data:
         all_columns.update(row.keys())
 

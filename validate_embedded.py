@@ -2,6 +2,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import streamlit as st
 from PIL import Image, UnidentifiedImageError
@@ -129,10 +130,13 @@ def show_validation_interface(current_user):
     )
 
     # Tolerate older deployments missing set_validated_by_image
+    _set_validated_by_image: Any | None = None
     try:
-        from reactions_db import set_validated_by_image as _set_validated_by_image
+        from reactions_db import (
+            set_validated_by_image as _set_validated_by_image,
+        )
     except Exception:
-        _set_validated_by_image = None
+        pass
 
     # Reuse single DB connection throughout the validation interface
     # Use the persistent reactions DB (resolved in reactions_db.DB_PATH)
@@ -502,7 +506,7 @@ def show_validation_interface(current_user):
                     by=current_user if desired_state else None,
                     at_iso=timestamp,
                 )
-                if _set_validated_by_image
+                if _set_validated_by_image is not None
                 else _fallback_set_validated_by_image(
                     con,
                     str(png_path),
@@ -997,6 +1001,45 @@ def show_validation_interface(current_user):
                         st.sidebar.info(f"TSV synced to DB: {mcount} measurements refreshed.")
                 except Exception as e:
                     st.sidebar.warning(f"Auto DB sync failed: {e}")
+
+            # --- Wrap selected text with \ce{...} helper ---
+            # Note: Streamlit can't read the selection from st.text_area; paste the selected text below
+            st.divider()
+            ce_col1, ce_col2, ce_col3 = st.columns([2, 1, 1])
+            with ce_col1:
+                st.text_input(
+                    "Selected text to wrap",
+                    key=f"wrap_ce_sel_{current_image}",
+                    placeholder="Paste the selected text here",
+                    help="Streamlit cannot read your selection from the editor. Paste the exact text you want to wrap.",
+                )
+            with ce_col2:
+                wrap_all = st.checkbox(
+                    "Wrap all",
+                    value=False,
+                    key=f"wrap_ce_all_{current_image}",
+                    help="If enabled, wraps all occurrences; otherwise only the first occurrence.",
+                )
+            with ce_col3:
+                if st.button(
+                    r"$\\ce{}$",
+                    key=f"wrap_ce_btn_{current_image}",
+                    help=r"Wrap selection with $\\ce{...}$",
+                ):
+                    base_text = st.session_state.get(session_key, edited_visible)
+                    target = st.session_state.get(f"wrap_ce_sel_{current_image}", "") or ""
+                    if target:
+                        replacement = f"$\\ce{{{target}}}$"
+                        new_text = (
+                            base_text.replace(target, replacement)
+                            if wrap_all
+                            else base_text.replace(target, replacement, 1)
+                        )
+                        st.session_state[session_key] = new_text
+                        st.success(r"Wrapped selection with $\\ce{...}$.")
+                        st.rerun()
+                    else:
+                        st.warning("Enter the text to wrap in the field provided.")
 
     # === LaTeX TAB ===
     with tab3:
