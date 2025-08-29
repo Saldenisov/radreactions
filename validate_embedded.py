@@ -1041,6 +1041,139 @@ def show_validation_interface(current_user):
                     else:
                         st.warning("Enter the text to wrap in the field provided.")
 
+            # --- Find & Replace helper (current TSV) ---
+            st.divider()
+            st.markdown("**Find & Replace (current TSV)**")
+            fr_col1, fr_col2, fr_col3, fr_col4 = st.columns([2, 2, 1, 1])
+            with fr_col1:
+                st.text_input(
+                    "Find",
+                    key=f"fr_find_{current_image}",
+                    placeholder="e.g. .OH",
+                )
+            with fr_col2:
+                st.text_input(
+                    "Replace with",
+                    key=f"fr_repl_{current_image}",
+                    placeholder="e.g. ^.OH",
+                )
+            with fr_col3:
+                st.checkbox(
+                    "Regex",
+                    key=f"fr_regex_{current_image}",
+                    value=False,
+                )
+            with fr_col4:
+                st.checkbox(
+                    "Case sensitive",
+                    key=f"fr_case_{current_image}",
+                    value=True,
+                )
+
+            # Track current search position for "Replace next"
+            pos_key = f"fr_pos_{current_image}"
+            if pos_key not in st.session_state:
+                st.session_state[pos_key] = 0
+
+            base_text = st.session_state.get(session_key, edited_visible)
+
+            def _compile_pattern(pat: str):
+                if not pat:
+                    return None
+                flags = (
+                    0 if st.session_state.get(f"fr_case_{current_image}", True) else re.IGNORECASE
+                )
+                if st.session_state.get(f"fr_regex_{current_image}", False):
+                    try:
+                        return re.compile(pat, flags)
+                    except re.error as e:
+                        st.warning(f"Invalid regex: {e}")
+                        return None
+                else:
+                    return re.compile(re.escape(pat), flags)
+
+            def _count_matches(text: str, pattern):
+                try:
+                    return len(list(pattern.finditer(text)))
+                except Exception:
+                    return 0
+
+            b1, b2, b3, b4 = st.columns([1, 1, 2, 2])
+            with b1:
+                if st.button("Find count", key=f"fr_count_{current_image}"):
+                    pat = _compile_pattern(st.session_state.get(f"fr_find_{current_image}", ""))
+                    if pat:
+                        cnt = _count_matches(base_text, pat)
+                        st.info(f"Found {cnt} matches in current TSV.")
+            with b2:
+                if st.button("Replace next", key=f"fr_next_{current_image}"):
+                    pat = _compile_pattern(st.session_state.get(f"fr_find_{current_image}", ""))
+                    if pat:
+                        start = int(st.session_state.get(pos_key, 0) or 0)
+                        m = pat.search(base_text, start)
+                        if not m and start > 0:
+                            # wrap around to beginning
+                            m = pat.search(base_text, 0)
+                            start = 0
+                        if m:
+                            before = base_text[: m.start()]
+                            after = base_text[m.end() :]
+                            rep = st.session_state.get(f"fr_repl_{current_image}", "")
+                            new_text = before + rep + after
+                            st.session_state[session_key] = new_text
+                            st.session_state[pos_key] = m.start() + len(rep)
+                            st.success("Replaced one occurrence.")
+                            st.rerun()
+                        else:
+                            st.info("No more matches.")
+            with b3:
+                if st.button("Replace all (current TSV)", key=f"fr_all_{current_image}"):
+                    pat = _compile_pattern(st.session_state.get(f"fr_find_{current_image}", ""))
+                    if pat:
+                        rep = st.session_state.get(f"fr_repl_{current_image}", "")
+                        try:
+                            new_text = pat.sub(lambda _m: rep, base_text)
+                        except re.error as e:
+                            st.warning(f"Replace failed: {e}")
+                            new_text = base_text
+                        st.session_state[session_key] = new_text
+                        st.success("Replaced all occurrences in current TSV.")
+                        st.rerun()
+            with b4:
+                if st.button(
+                    "Replace all + Save & Recompile", key=f"fr_all_compile_{current_image}"
+                ):
+                    pat = _compile_pattern(st.session_state.get(f"fr_find_{current_image}", ""))
+                    if pat:
+                        rep = st.session_state.get(f"fr_repl_{current_image}", "")
+                        try:
+                            replaced = pat.sub(lambda _m: rep, base_text)
+                        except re.error as e:
+                            st.warning(f"Replace failed: {e}")
+                            replaced = base_text
+                        # Save to TSV and apply corrections
+                        edited_tsv2 = visible_to_tsv(replaced, tab_symbol=tab_symbol)
+                        tsv_path.write_text(edited_tsv2, encoding="utf-8")
+                        corrected_tsv_text2 = correct_tsv_file(tsv_path)
+                        st.session_state[session_key] = tsv_to_visible(
+                            corrected_tsv_text2, tab_symbol=tab_symbol
+                        )
+                        # Regenerate LaTeX and compile
+                        latex_path2 = tsv_to_full_latex_article(tsv_path)
+                        latex_session_key = f"edited_latex_{current_image}"
+                        try:
+                            st.session_state[latex_session_key] = latex_path2.read_text(
+                                encoding="utf-8"
+                            )
+                        except Exception:
+                            pass
+                        rc, out = compile_tex_to_pdf(latex_path2)
+                        if rc != 0:
+                            st.error(f"Compilation failed:\n{out}")
+                        else:
+                            st.success("Replacements applied; TSV saved and recompiled.")
+                        st.rerun()
+
     # === LaTeX TAB ===
     with tab3:
         st.header("Edit LaTeX")
