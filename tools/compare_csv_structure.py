@@ -30,14 +30,14 @@ Notes:
 - Empty/whitespace-only lines are ignored for structural counts.
 - The first column is treated as the reaction ID when non-empty for ID set comparisons.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
-import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
 
 
 def _read_text(p: Path) -> str:
@@ -79,7 +79,7 @@ class FileStruct:
         return {r.id_value for r in self.row_structs if r.id_value != ""}
 
 
-def _parse_file_structure(p: Path, *, force_delim: Optional[str] = None) -> FileStruct:
+def _parse_file_structure(p: Path, *, force_delim: str | None = None) -> FileStruct:
     raw = _read_text(p)
     lines = _iter_nonempty_lines(raw)
     delim = force_delim or _sniff_delimiter(lines)
@@ -120,7 +120,7 @@ def compare_structures(
     ai: FileStruct,
     *,
     max_mismatches_detail: int = 50,
-    expected_ai_cols: Optional[int] = None,
+    expected_ai_cols: int | None = None,
 ) -> FileComparison:
     mismatches: list[dict] = []
     ai_wrong_cols: list[dict] = []
@@ -155,8 +155,12 @@ def compare_structures(
                         "ai_cols": r.cols,
                         "expected": expected_ai_cols,
                         "ai_id": r.id_value,
-                        "orig_cols": orig.row_structs[i - 1].cols if i - 1 < len(orig.row_structs) else None,
-                        "orig_id": orig.row_structs[i - 1].id_value if i - 1 < len(orig.row_structs) else None,
+                        "orig_cols": orig.row_structs[i - 1].cols
+                        if i - 1 < len(orig.row_structs)
+                        else None,
+                        "orig_id": orig.row_structs[i - 1].id_value
+                        if i - 1 < len(orig.row_structs)
+                        else None,
                     }
                 )
 
@@ -185,8 +189,8 @@ def compare_folders(
     glob_pattern: str = "*.csv",
     batch_size: int = 5,
     max_mismatches_detail: int = 50,
-    force_delim_orig: Optional[str] = None,
-    force_delim_ai: Optional[str] = None,
+    force_delim_orig: str | None = None,
+    force_delim_ai: str | None = None,
     show_details: bool = False,
     max_details: int = 10,
     strict_7_cols: bool = False,
@@ -241,12 +245,18 @@ def compare_folders(
                         to_show = min(max_details, len(cmp.mismatched_rows))
                         for k in range(to_show):
                             d = cmp.mismatched_rows[k]
-                            rid = f"orig_id={d['orig_id']} ai_id={d['ai_id']}" if d.get('orig_id') or d.get('ai_id') else ""
+                            rid = (
+                                f"orig_id={d['orig_id']} ai_id={d['ai_id']}"
+                                if d.get("orig_id") or d.get("ai_id")
+                                else ""
+                            )
                             print(
                                 f"    row {d['row']}: orig_cols={d['orig_cols']} ai_cols={d['ai_cols']} {rid}"
                             )
                         if len(cmp.mismatched_rows) > to_show:
-                            print(f"    ... {len(cmp.mismatched_rows) - to_show} more row mismatches")
+                            print(
+                                f"    ... {len(cmp.mismatched_rows) - to_show} more row mismatches"
+                            )
                         if cmp.ai_wrong_col_rows:
                             wshow = min(max_details, len(cmp.ai_wrong_col_rows))
                             for k in range(wshow):
@@ -256,7 +266,9 @@ def compare_folders(
                                     f"    [STRICT] row {d['row']}: ai_cols={d['ai_cols']} expected={d['expected']} {rid}"
                                 )
                             if len(cmp.ai_wrong_col_rows) > wshow:
-                                print(f"    ... {len(cmp.ai_wrong_col_rows) - wshow} more strict AI column issues")
+                                print(
+                                    f"    ... {len(cmp.ai_wrong_col_rows) - wshow} more strict AI column issues"
+                                )
                         if cmp.missing_ids_in_ai:
                             show_ids = cmp.missing_ids_in_ai[:10]
                             print(f"    missing_ids_in_ai (first {len(show_ids)}): {show_ids}")
@@ -344,13 +356,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _map_delim(opt: Optional[str]) -> Optional[str]:
+def _map_delim(opt: str | None) -> str | None:
     if opt is None:
         return None
     return "\t" if opt == "tab" else ","
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
 
     orig_folder = Path(args.orig_folder).resolve()

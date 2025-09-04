@@ -394,11 +394,11 @@ MIT License - See LICENSE file for details
 
 ### Data Attribution
 Data initially derived from:
-*Critical Review of rate constants for hydrated electrons, hydrogen atoms and hydroxyl radicals in aqueous solution* 
+*Critical Review of rate constants for hydrated electrons, hydrogen atoms and hydroxyl radicals in aqueous solution*
 DOI: 10.1063/1.555805
 
 ---
 
-**Last Updated**: January 2025  
-**Version**: 0.0.0  
+**Last Updated**: January 2025
+**Version**: 0.0.0
 **Maintainer**: Sergey Denisov (sergey.denisov@universite-paris-saclay.fr)

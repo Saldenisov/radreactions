@@ -12,20 +12,19 @@ Environment:
 Usage:
   python csv_ai_corrector_first_10.py
 """
+
 from __future__ import annotations
 
+import msvcrt
 import os
 import re
-import sys
 import time
-import logging
-import msvcrt
 from pathlib import Path
-from typing import Optional
 
 # Best-effort: load .env if present
 try:
     from dotenv import load_dotenv  # type: ignore
+
     load_dotenv()
 except Exception:
     pass
@@ -76,12 +75,12 @@ Continuation row handling - CRITICAL RULES:
    "1\tSilver(I) Ion\t$\ce{^{\cdot}OH + Ag^+ -> AgOH^+}$\t\t$1.4 \times 10^{10}$\tAverage of 2 values.\t
    \t\t\t\t$1.2 \times 10^{10}$\tp.r.; P.b.k. at 320 nm.\t83R031
    \t\t\t7\t$1.5 \times 10^{10}$\tp.r.; P.b.k. at 313 and 365 nm.\t680436"
-   
+
    OUTPUT:
    "1\tSilver(I) Ion\t$\ce{^.OH + Ag^+ -> AgOH^+}$\t\t$1.4 \times 10^{10}$\tAverage of 2 values.\t
    \t\t\t\t$1.2 \times 10^{10}$\tp.r.; P.b.k. at 320 nm.\t83R031
    \t\t\t7\t$1.5 \times 10^{10}$\tp.r.; P.b.k. at 313 and 365 nm.\t680436"
-   
+
    Notice: pH values (including "7"), rates, comments, and references are all preserved exactly.
 
 Delimiter normalization: If the input line uses non-TAB separators between fields (e.g., the Unicode arrow →, ASCII |, or runs of multiple spaces) and the line clearly contains exactly seven fields in the schema, treat those separators as column delimiters and convert them to single TABs. Never alter arrows that appear inside LaTeX or \\ce{...} chemistry.
@@ -146,8 +145,8 @@ Quote any field containing a tab or double quotes using standard CSV quoting (do
 def check_for_stop():
     """Check if user wants to stop execution by pressing 'q' key"""
     if msvcrt.kbhit():
-        key = msvcrt.getch().decode('utf-8').lower()
-        if key == 'q':
+        key = msvcrt.getch().decode("utf-8").lower()
+        if key == "q":
             print("\n>>> User requested stop. Exiting...")
             return True
     return False
@@ -240,10 +239,10 @@ def extract_csv_text(text: str) -> str:
     else:
         # Otherwise, hope the model returned plain CSV
         content = text.strip()
-    
+
     # Fix literal \n in the content to actual newlines
-    content = content.replace('\\n', '\n')
-    
+    content = content.replace("\\n", "\n")
+
     return content
 
 
@@ -252,7 +251,7 @@ def correct_csv_with_openai(
     *,
     model: str = "gpt-4.1-mini",
     temperature: float = 0.0,
-    system_prompt: Optional[str] = None,
+    system_prompt: str | None = None,
     max_retries: int = 3,
 ) -> str:
     """Send CSV text to OpenAI to correct it and return the corrected CSV text."""
@@ -275,7 +274,7 @@ def correct_csv_with_openai(
         },
     ]
 
-    last_err: Optional[BaseException] = None
+    last_err: BaseException | None = None
     for attempt in range(1, max_retries + 1):
         try:
             resp = client.chat.completions.create(
@@ -305,44 +304,44 @@ def process_single_csv_with_openai(
     dst_path: Path,
     *,
     model: str = "gpt-4.1-mini",
-    system_prompt: Optional[str] = None,
+    system_prompt: str | None = None,
 ) -> bool:
     """Process a single CSV file with OpenAI and save the result. Returns True if user requested stop."""
     try:
         # Check for stop before processing
         if check_for_stop():
             return True
-            
+
         # Read the source file
         try:
             raw = src_path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             raw = src_path.read_text(encoding="utf-8-sig")
-        
-        print(f"  Sending to OpenAI for correction...")
-        
+
+        print("  Sending to OpenAI for correction...")
+
         # Check for stop during processing
         if check_for_stop():
             return True
-            
+
         # Process with OpenAI
         corrected = correct_csv_with_openai(
             raw,
             model=model,
             system_prompt=system_prompt,
         )
-        
+
         # Check for stop after OpenAI response
         if check_for_stop():
             return True
-            
+
         # Sanitize and save
         corrected = _sanitize_ce_wrapping(corrected).strip() + "\n"
         dst_path.write_text(corrected, encoding="utf-8")
-        
+
         print(f"  ✓ Corrected and saved to: {dst_path.name}")
         return False
-        
+
     except Exception as e:
         print(f"  ✗ Error processing {src_path.name}: {e}")
         return False
@@ -350,77 +349,79 @@ def process_single_csv_with_openai(
 
 def process_first_10_reactions_with_openai():
     """Process only the first 10 CSV files with OpenAI correction and user stop capability"""
-    print("Starting OpenAI correction of first 10 reactions from table8_exported/sub_tables_images/csv")
+    print(
+        "Starting OpenAI correction of first 10 reactions from table8_exported/sub_tables_images/csv"
+    )
     print("Press 'q' at any time to stop execution")
     print("-" * 80)
-    
+
     # Check for API key
     if not os.getenv("OPENAI_API_KEY"):
         print("ERROR: OPENAI_API_KEY is not set!")
         print("Please set your OpenAI API key in the environment.")
         return
-    
+
     # Input and output directories
     input_folder = Path("E:/ICP_notebooks/Buxton/table8_exported/sub_tables_images/csv")
     output_folder = Path("E:/ICP_notebooks/Buxton/table8_exported/sub_tables_images/csv_ai")
-    
+
     if not input_folder.exists():
         print(f"Error: Input directory {input_folder} does not exist!")
         return
-    
+
     # Create output directory
     output_folder.mkdir(parents=True, exist_ok=True)
-    
+
     # Get all CSV files and sort them
     csv_files = sorted(list(input_folder.glob("*.csv")))
-    
+
     if not csv_files:
         print("No CSV files found in the input directory!")
         return
-    
+
     print(f"Found {len(csv_files)} CSV files. Processing first 10 with OpenAI...")
-    
+
     # Process only first 10 files
     processed = 0
     for i, csv_path in enumerate(csv_files[:10], 1):
         print(f"\\nProcessing [{i}/10]: {csv_path.name}")
-        
+
         # Check for stop before processing each file
         if check_for_stop():
             print("\\n>>> User requested stop. Exiting...")
             break
-        
+
         # Output path
         dst_path = output_folder / csv_path.name
-        
+
         # Skip if already exists (unless user wants to overwrite)
         if dst_path.exists():
             print(f"  → Already exists: {dst_path.name} (skipping)")
             processed += 1
             continue
-        
+
         try:
             stopped = process_single_csv_with_openai(
-                csv_path, 
+                csv_path,
                 dst_path,
                 model="gpt-4-1106-preview",  # Use gpt-4 turbo for better results
-                system_prompt=DEFAULT_SYSTEM_PROMPT
+                system_prompt=DEFAULT_SYSTEM_PROMPT,
             )
-            
+
             if stopped:
                 break
-                
+
             processed += 1
-            
+
             # Small delay to allow user to press 'q' and to respect API rate limits
             time.sleep(0.5)
-            
+
         except Exception as e:
             print(f"  ✗ Error processing {csv_path.name}: {e}")
             continue
-    
-    print(f"\\n" + "="*80)
-    print(f"OpenAI correction completed!")
+
+    print("\\n" + "=" * 80)
+    print("OpenAI correction completed!")
     print(f"Files processed: {processed}/10")
     print(f"Output directory: {output_folder}")
     print(f"Remaining files in source: {len(csv_files) - 10} (not processed)")

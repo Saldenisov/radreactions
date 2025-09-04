@@ -20,17 +20,17 @@ Notes:
   - The tool sends the entire CSV content to the model and expects plain CSV in response.
   - For very large CSVs, you may need to chunk or down-scope the input; we can extend the tool later.
 """
+
 from __future__ import annotations
 
 import argparse
+import concurrent.futures as cf
+import logging
 import os
 import re
 import sys
 import time
-import logging
-import concurrent.futures as cf
 from pathlib import Path
-from typing import Optional
 
 # Best-effort: load .env if present
 try:
@@ -182,8 +182,15 @@ def _is_likely_chemical_token(inner: str) -> bool:
     if " " in inner:
         if any(c in inner for c in (";", ":", ",")):
             return False
-        has_connector = ("+" in inner or "->" in inner or "<-" in inner or "<=>" in inner
-                         or "\\rightleftharpoons" in inner or "→" in inner or "↔" in inner)
+        has_connector = (
+            "+" in inner
+            or "->" in inner
+            or "<-" in inner
+            or "<=>" in inner
+            or "\\rightleftharpoons" in inner
+            or "→" in inner
+            or "↔" in inner
+        )
         if not has_connector:
             return False
         # Allow backslash LaTeX macros and underscores
@@ -197,6 +204,7 @@ def _is_likely_chemical_token(inner: str) -> bool:
     if not re.fullmatch(r"[A-Za-z0-9\.\+\-\^\{\}\(\)_\\]+", inner):
         return False
     return True
+
 
 def _sanitize_ce_wrapping(tsv_text: str, protected_reaction_col: int = 2) -> str:
     """Unwrap incorrect $\\ce{...}$ across all columns except the Reaction column.
@@ -313,7 +321,7 @@ def correct_csv_with_openai(
     *,
     model: str = "gpt-4.1-mini",
     temperature: float = 0.0,
-    system_prompt: Optional[str] = None,
+    system_prompt: str | None = None,
     max_retries: int = 3,
 ) -> str:
     """Send CSV text to OpenAI to correct it and return the corrected CSV text.
@@ -339,7 +347,7 @@ def correct_csv_with_openai(
         },
     ]
 
-    last_err: Optional[BaseException] = None
+    last_err: BaseException | None = None
     for attempt in range(1, max_retries + 1):
         try:
             resp = client.chat.completions.create(
@@ -351,9 +359,7 @@ def correct_csv_with_openai(
             return extract_csv_text(out)
         except Exception as e:  # Broad catch to avoid SDK-version-specific imports
             last_err = e
-            logging.warning(
-                "OpenAI request attempt %d/%d failed: %s", attempt, max_retries, e
-            )
+            logging.warning("OpenAI request attempt %d/%d failed: %s", attempt, max_retries, e)
             if attempt < max_retries:
                 # Exponential-ish backoff
                 time.sleep(1.5 * attempt)
@@ -384,7 +390,7 @@ def _parse_marked_blocks(text: str) -> list[tuple[str, str]]:
             # Extract filename between the colon and closing >>>
             header = line
             try:
-                name = header[len("<<<BEGIN FILE:"): -3].strip()
+                name = header[len("<<<BEGIN FILE:") : -3].strip()
             except Exception:
                 name = ""
             i += 1
@@ -410,7 +416,7 @@ def correct_multi_csv_with_openai(
     *,
     model: str = "gpt-4.1-mini",
     temperature: float = 0.0,
-    system_prompt: Optional[str] = None,
+    system_prompt: str | None = None,
     max_retries: int = 3,
 ) -> dict[str, str]:
     """Send multiple CSV texts to OpenAI in one request; return mapping filename -> corrected text.
@@ -448,7 +454,7 @@ def correct_multi_csv_with_openai(
         {"role": "user", "content": user_content},
     ]
 
-    last_err: Optional[BaseException] = None
+    last_err: BaseException | None = None
     for attempt in range(1, max_retries + 1):
         try:
             resp = client.chat.completions.create(
@@ -485,7 +491,7 @@ def process_folder(
     model: str = "gpt-4.1-mini",
     overwrite: bool = False,
     dry_run: bool = False,
-    system_prompt_file: Optional[Path] = None,
+    system_prompt_file: Path | None = None,
     workers: int = 5,
     submit_delay: float = 0.05,
     batch_size: int = 1,
@@ -501,7 +507,11 @@ def process_folder(
     manifest_path = output_folder / "_scan_manifest.txt"
 
     if manifest_path.exists():
-        names = [ln.strip() for ln in manifest_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        names = [
+            ln.strip()
+            for ln in manifest_path.read_text(encoding="utf-8").splitlines()
+            if ln.strip()
+        ]
         files = [input_folder / n for n in names]
         files = [p for p in files if p.is_file()]
         logging.info(
@@ -516,12 +526,10 @@ def process_folder(
         logging.info("Created manifest at %s with %d file(s).", manifest_path, len(files))
 
     if not files:
-        logging.info(
-            "No files matched pattern '%s' under %s", glob_pattern, input_folder
-        )
+        logging.info("No files matched pattern '%s' under %s", glob_pattern, input_folder)
         return
 
-    system_prompt: Optional[str] = None
+    system_prompt: str | None = None
     if system_prompt_file is not None:
         if not system_prompt_file.exists():
             raise FileNotFoundError(f"System prompt file not found: {system_prompt_file}")
@@ -598,7 +606,7 @@ def process_folder(
         try:
             # Read inputs
             names_and_texts: list[tuple[str, str]] = []
-            for (_, src, _) in batch:
+            for _, src, _ in batch:
                 try:
                     raw = src.read_text(encoding="utf-8")
                 except UnicodeDecodeError:
@@ -613,9 +621,11 @@ def process_folder(
             )
 
             statuses: list[tuple] = []
-            for (idx, src, dst) in batch:
+            for idx, src, dst in batch:
                 if src.name not in name_to_corrected:
-                    statuses.append(("error", idx, src.name, str(dst), "missing output for file in batch"))
+                    statuses.append(
+                        ("error", idx, src.name, str(dst), "missing output for file in batch")
+                    )
                     continue
                 corrected = name_to_corrected[src.name]
                 corrected = _sanitize_ce_wrapping(corrected).strip() + "\n"
@@ -633,7 +643,7 @@ def process_folder(
     if batch_size <= 1:
         if not parallel or workers <= 1:
             logging.info("Running sequentially (no parallel workers).")
-            for (idx, src, dst) in to_process:
+            for idx, src, dst in to_process:
                 try:
                     status_tuple = _worker(idx, src, dst)
                 except KeyboardInterrupt:
@@ -895,14 +905,14 @@ def process_folder(
 def process_single_file(
     input_file: Path,
     *,
-    output_folder: Optional[Path] = None,
+    output_folder: Path | None = None,
     model: str = "gpt-4.1-mini",
     overwrite: bool = False,
     dry_run: bool = False,
-    system_prompt: Optional[str] = None,
+    system_prompt: str | None = None,
 ) -> bool:
     """Process a single CSV file with OpenAI.
-    
+
     Args:
         input_file: Path to the input CSV file
         output_folder: Path to the output folder (if None, uses input_file.parent/"csv_ai")
@@ -910,42 +920,42 @@ def process_single_file(
         overwrite: Whether to overwrite existing output files
         dry_run: Whether to just simulate the run without writing
         system_prompt: Optional custom system prompt
-        
+
     Returns:
         True if successful, False otherwise
     """
     if not input_file.exists() or not input_file.is_file():
         print(f"[ERROR] Input file not found: {input_file}")
         return False
-        
+
     # Determine output folder and output file path
     if output_folder is None:
         output_folder = input_file.parent.with_name(input_file.parent.name + "_ai")
-        
+
     output_folder.mkdir(parents=True, exist_ok=True)
     output_file = output_folder / input_file.name
-    
+
     # Check if output exists
     if output_file.exists() and not overwrite:
         print(f"[SKIP] Output file already exists: {output_file}")
         return True
-        
+
     # Process the file
     try:
         print(f"Processing: {input_file.name}")
-        
+
         try:
             raw = input_file.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             raw = input_file.read_text(encoding="utf-8-sig")
-            
+
         corrected = correct_csv_with_openai(
             raw,
             model=model,
             system_prompt=system_prompt,
         )
         corrected = _sanitize_ce_wrapping(corrected).strip() + "\n"
-        
+
         if dry_run:
             print(f"[DRY-RUN] Would write corrected content to: {output_file}")
             return True
@@ -953,7 +963,7 @@ def process_single_file(
             output_file.write_text(corrected, encoding="utf-8")
             print(f"[SUCCESS] Wrote corrected content to: {output_file}")
             return True
-            
+
     except Exception as e:
         print(f"[ERROR] Failed to process {input_file.name}: {e}")
         return False
@@ -961,9 +971,7 @@ def process_single_file(
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description=(
-            "Correct CSV files in a folder or a single file using OpenAI."
-        )
+        description=("Correct CSV files in a folder or a single file using OpenAI.")
     )
     group = p.add_mutually_exclusive_group(required=True)
     group.add_argument(
@@ -1015,9 +1023,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--system-prompt-file",
         type=str,
-        help=(
-            "Optional path to a file containing a custom system prompt to guide corrections."
-        ),
+        help=("Optional path to a file containing a custom system prompt to guide corrections."),
     )
     p.add_argument(
         "--workers",
@@ -1049,7 +1055,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
 
@@ -1066,18 +1072,20 @@ def main(argv: Optional[list[str]] = None) -> int:
             if not system_prompt_file.exists():
                 raise FileNotFoundError(f"System prompt file not found: {system_prompt_file}")
             system_prompt = system_prompt_file.read_text(encoding="utf-8")
-        
+
         # Process a single file if specified
         if args.file:
             input_file = Path(args.file).resolve()
-            
+
             # Determine output folder
             if args.output_folder:
                 output_folder = Path(args.output_folder).resolve()
             else:
                 # Default to parent_folder + _ai
-                output_folder = input_file.parent.with_name(input_file.parent.name + args.output_suffix)
-            
+                output_folder = input_file.parent.with_name(
+                    input_file.parent.name + args.output_suffix
+                )
+
             success = process_single_file(
                 input_file,
                 output_folder=output_folder,
@@ -1096,7 +1104,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                 model=args.model,
                 overwrite=args.overwrite,
                 dry_run=args.dry_run,
-                system_prompt_file=Path(args.system_prompt_file).resolve() if args.system_prompt_file else None,
+                system_prompt_file=Path(args.system_prompt_file).resolve()
+                if args.system_prompt_file
+                else None,
                 workers=args.workers,
                 submit_delay=args.submit_delay,
                 batch_size=args.batch_size,
@@ -1113,4 +1123,3 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

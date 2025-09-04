@@ -19,17 +19,18 @@ Rules implemented:
 
 This is a conservative structural fixer intended to resolve row/column mismatches and collapsed rows.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import re
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, Optional
 
 REFERENCE_PATTERNS = [
     re.compile(r"^[0-9]{2}[A-Z][0-9]{3}$"),  # e.g., 83R031
-    re.compile(r"^[0-9]{6}$"),               # e.g., 771130
+    re.compile(r"^[0-9]{6}$"),  # e.g., 771130
 ]
 
 # Basic detector for likely numeric pH tokens (allows ranges and approximate symbol)
@@ -145,7 +146,7 @@ def is_continuation(cols: list[str]) -> bool:
     # Continuation if fewer than 3 fields OR first three are empty
     if len(cols) < 3:
         return True
-    if (cols[0].strip() == "" and cols[1].strip() == "" and cols[2].strip() == ""):
+    if cols[0].strip() == "" and cols[1].strip() == "" and cols[2].strip() == "":
         return True
     # Also treat lines that begin with nothing but whitespace before 3rd tab as continuation
     return False
@@ -180,7 +181,9 @@ def load_flagged_names_from_jsonl(report_path: Path) -> list[str]:
     return names
 
 
-def process_files(orig_folder: Path, ai_folder: Path, names: Iterable[str], overwrite: bool = True) -> tuple[int, int]:
+def process_files(
+    orig_folder: Path, ai_folder: Path, names: Iterable[str], overwrite: bool = True
+) -> tuple[int, int]:
     ai_folder.mkdir(parents=True, exist_ok=True)
     wrote = 0
     skipped = 0
@@ -203,19 +206,34 @@ def process_files(orig_folder: Path, ai_folder: Path, names: Iterable[str], over
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Local GPT-5-style TSV corrector (offline)")
-    p.add_argument("--orig-folder", "-i", type=str, required=True, help="Path to original TSV/CSV folder (source)")
+    p.add_argument(
+        "--orig-folder",
+        "-i",
+        type=str,
+        required=True,
+        help="Path to original TSV/CSV folder (source)",
+    )
     p.add_argument("--ai-folder", "-a", type=str, help="Output folder (defaults to <orig>_ai)")
-    p.add_argument("--from-json-report", type=str, required=True, help="Path to JSONL report from compare_csv_structure")
+    p.add_argument(
+        "--from-json-report",
+        type=str,
+        required=True,
+        help="Path to JSONL report from compare_csv_structure",
+    )
     p.add_argument("--overwrite", action="store_true", help="Overwrite outputs if exist")
     return p
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = build_arg_parser()
     args = ap.parse_args(argv)
 
     orig_folder = Path(args.orig_folder).resolve()
-    ai_folder = Path(args.ai_folder).resolve() if args.ai_folder else orig_folder.with_name(orig_folder.name + "_ai")
+    ai_folder = (
+        Path(args.ai_folder).resolve()
+        if args.ai_folder
+        else orig_folder.with_name(orig_folder.name + "_ai")
+    )
     report_path = Path(args.from_json_report).resolve()
 
     if not orig_folder.exists() or not orig_folder.is_dir():
@@ -231,4 +249,3 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
