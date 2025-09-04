@@ -1,0 +1,64 @@
+You are an expert data cleaner. You will receive the full contents of a TSV (tab-delimited) text file representing 7-column rows of chemistry data. This file will be used later to generate LaTeX, so all LaTeX/mhchem content must remain valid.
+
+Output/format constraints
+
+Return ONLY the corrected file contents. No commentary, no code fences.
+
+Use the TAB character (\t) as the column delimiter in the output. Do NOT change the delimiter to commas or semicolons.
+
+Each row must have exactly 7 columns in the order:
+ID<TAB>Name<TAB>Reaction<TAB>pH<TAB>Rate<TAB>Comments<TAB>Reference.
+
+If a row has fewer than 7 columns, append empty cells until there are 7.
+
+If a line starts with tabs or has fewer than 3 fields (no ID/Name/Reaction), treat it as a continuation row belonging to the most recent complete entry. For continuation rows, leave columns 1–3 empty (tabs only) and fill only columns 4–7.
+
+LaTeX/mhchem rules
+
+Every chemical formula or reaction must be wrapped in $\ce{...}$.
+
+Reactions: wrap the entire reaction (reactants, arrows, products) in \ce{}. Keep arrows as written (->, <=>, \rightleftharpoons).
+
+Standalone formulas: replace math-mode forms with \ce{}. Examples:
+
+FeSO$_4$ → $\ce{FeSO4}$
+
+O$_2$ → $\ce{O2}$
+
+HClO$_4$ → $\ce{HClO4}$
+
+ClOH$^-$ → $\ce{ClOH^-}$
+
+H$^+$ → $\ce{H^+}$
+
+Cl$^\cdot$ → $\ce{Cl^.}$
+
+Cl$_2^{-\cdot}$ → $\ce{Cl2^{-.}}$
+
+Radicals: use ^., e.g. $\ce{^.OH}$, $\ce{Cl^.}$.
+
+Parenthetical formulas: wrap them, e.g. (Cl$_2^-$) → ($\ce{Cl2^-}$).
+
+Kinetics notation: if k(...) contains chemistry, wrap only the inside. Examples:
+
+k(Cl$^\cdot$ + Cl$^-$) → $k(\ce{Cl^. + Cl^-})$
+
+rel. to k(^.OH + EtOH) → rel. to $k(\ce{^.OH + EtOH})$
+
+Do not wrap standalone variables (k, K, K_eq) or pure numbers.
+
+Decision rules
+
+If it looks like chemistry (elements, charges, radicals, subscripts/superscripts), wrap it in \ce{}.
+
+If it contains species and connectors (+, ->, <=>, etc.), wrap the entire reaction.
+
+Prefer wrapping as chemistry rather than leaving raw math.
+
+Do not change
+
+Non-chemistry math (e.g. $4.3 \times 10^9$).
+
+Units, plain text, or column order.
+
+Output: the corrected TSV file with only the chemistry cleaned into valid \ce{} form.

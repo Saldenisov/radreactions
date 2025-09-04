@@ -7,6 +7,7 @@ table data that will be extracted to the data directory.
 import io
 import os
 import shutil
+import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -247,6 +248,268 @@ def main():
         return
 
     st.success(f"✅ Authenticated as: {current_user}")
+
+    # Admin Tools in left sidebar (superuser only)
+    with st.sidebar:
+        st.subheader("🛠 Admin Tools")
+        if current_user == "saldenisov":
+            st.caption("Admin utilities and maintenance operations.")
+
+            # Pause toggle for DB access across pages
+            _db_paused = bool(st.session_state.get("db_paused", False))
+            new_pause = st.checkbox(
+                "Pause DB access",
+                value=_db_paused,
+                help="Prevents UI from opening the DB during maintenance (avoids file locks)",
+                key="sidebar_pause_db",
+            )
+            if new_pause != _db_paused:
+                st.session_state.db_paused = new_pause
+                st.success(f"DB pause set to {new_pause}")
+
+            st.markdown("---")
+            # Rebuild DB from validated sources (offline build + swap)
+            if st.button(
+                "🔄 Rebuild DB from Validated Sources",
+                use_container_width=True,
+                key="rebuild_db_btn",
+            ):
+                try:
+                    st.session_state.db_paused = True
+                    try:
+                        # Best-effort: allow any open connections elsewhere to settle
+                        time.sleep(0.2)
+                    except Exception:
+                        pass
+                    from config import BASE_DIR as _BASE
+                    from tools.rebuild_db import build_db_offline_fast, swap_live_db
+
+                    build_path = _BASE / "reactions_build.db"
+                    build_db_offline_fast(build_path)
+                    swap_live_db(build_path)
+                    st.success("Database rebuilt successfully with validated entries only!")
+                except Exception as e:
+                    # Fallback legacy approach if swap fails due to locks/corruption
+                    msg = str(e)
+                    st.warning(f"Primary rebuild failed, attempting fallback...\n{msg}")
+                    try:
+                        from tools.rebuild_db import rebuild_db_from_validations
+
+                        rebuild_db_from_validations()
+                        st.success("Database rebuilt successfully (fallback path).")
+                    except Exception as e2:
+                        st.error(f"Database rebuild failed after fallback: {e2}")
+                finally:
+                    st.session_state.db_paused = False
+
+            st.markdown("---")
+            # Batch: TSV -> LaTeX -> PDF for non-validated and/or missing PDFs
+            st.caption("TSV → LaTeX → PDF batch")
+            try:
+                from config import AVAILABLE_TABLES as _ALL_TABLES
+            except Exception:
+                _ALL_TABLES = []
+            _scope_options = ["All tables"] + _ALL_TABLES
+            _selected_scope = st.selectbox(
+                "Scope",
+                options=_scope_options,
+                index=0,
+                help="Process all tables or limit to a single table",
+                key="batch_scope",
+            )
+            _include_missing_pdfs = st.checkbox(
+                "Include items with missing PDF",
+                value=True,
+                help="Process images where the compiled PDF is not present",
+                key="include_missing_pdfs",
+            )
+            _max_items = st.number_input(
+                "Max items (0 = no limit)",
+                min_value=0,
+                value=0,
+                step=1,
+                key="batch_max_items",
+            )
+            _dry_run = st.checkbox("Dry run (list only)", value=False, key="batch_dry_run")
+            _run_parallel = st.checkbox("Run in parallel", value=True, key="batch_parallel")
+            if _run_parallel:
+                try:
+                    import os as _os_mod
+
+                    default_workers = _os_mod.cpu_count() or 4
+                except Exception:
+                    default_workers = 4
+                _workers = st.number_input(
+                    "Workers",
+                    min_value=1,
+                    max_value=64,
+                    value=int(default_workers),
+                    step=1,
+                    key="batch_workers",
+                )
+            else:
+                _workers = 1
+
+            if st.button("🧾 Run TSV → LaTeX → PDF", use_container_width=True, key="run_batch_pdf"):
+                try:
+                    from pathlib import Path as _Path
+
+                    from config import AVAILABLE_TABLES, get_table_paths
+                    from pdf_utils import compile_tex_to_pdf, tsv_to_full_latex_article
+                    from reactions_db import ensure_db, get_validation_meta_by_source
+                    from tsv_utils import correct_tsv_file
+
+                    con_local = ensure_db()
+                    tables_to_scan = (
+                        AVAILABLE_TABLES
+                        if _selected_scope == "All tables"
+                        else [str(_selected_scope)]
+                    )
+
+                    to_process: list[tuple[str, str, _Path]] = []
+                    missing_sources = 0
+                    missing_pdfs = 0
+                    for table in tables_to_scan:
+                        IMG_DIR, PDF_DIR, TSV_DIR, _ = get_table_paths(table)
+                        images = sorted([p.name for p in IMG_DIR.glob("*.png")])
+                        for img in images:
+                            stem = _Path(img).stem
+                            csv_path = TSV_DIR / f"{stem}.csv"
+                            tsv_path = TSV_DIR / f"{stem}.tsv"
+                            source = (
+                                csv_path
+                                if csv_path.exists()
+                                else (tsv_path if tsv_path.exists() else None)
+                            )
+                            if not source:
+                                missing_sources += 1
+                                continue
+                            meta = get_validation_meta_by_source(con_local, str(source))
+                            validated = bool(meta.get("validated", False))
+                            pdf_path = PDF_DIR / f"{stem}.pdf"
+                            pdf_missing = not pdf_path.exists()
+                            if (not validated) or (_include_missing_pdfs and pdf_missing):
+                                to_process.append((table, img, source))
+                                if pdf_missing:
+                                    missing_pdfs += 1
+
+                    if _max_items and int(_max_items) > 0:
+                        to_process = to_process[: int(_max_items)]
+
+                    total = len(to_process)
+                    scope_label = (
+                        "all tables" if _selected_scope == "All tables" else f"{_selected_scope}"
+                    )
+                    if total == 0:
+                        st.info("No items found for the selected scope and options.")
+                    else:
+                        if _dry_run:
+                            st.info(
+                                f"[Dry run] Scope: {scope_label}. Would process {total} items (missing TSV/CSV: {missing_sources}, missing PDFs: {missing_pdfs})."
+                            )
+                            with st.expander("Show items to process", expanded=False):
+                                for table, img, src in to_process:
+                                    st.write(f"{table}/{img}: {src}")
+                        else:
+                            st.write(
+                                f"Scope: {scope_label}. Found {total} items to process (missing TSV/CSV: {missing_sources}, missing PDFs: {missing_pdfs})."
+                            )
+                            progress = st.progress(0.0)
+                            ok = 0
+                            failed = 0
+                            logs: list[str] = []
+                            pdfs: list[tuple[str, str, str]] = []
+
+                            def _run_one_compile(src_path: _Path):
+                                try:
+                                    correct_tsv_file(src_path)
+                                    latex_path = tsv_to_full_latex_article(src_path)
+                                    rc, out = compile_tex_to_pdf(latex_path)
+                                    if rc == 0:
+                                        pdf_path = str(
+                                            latex_path.parent / (latex_path.stem + ".pdf")
+                                        )
+                                        return True, "", pdf_path
+                                    else:
+                                        tail = out[-4000:] if isinstance(out, str) else str(out)
+                                        return False, f"LaTeX failed (exit {rc}).\n{tail}", None
+                                except Exception as e:
+                                    return False, f"Error: {e}", None
+
+                            if _run_parallel and _workers and int(_workers) > 1:
+                                from concurrent.futures import ThreadPoolExecutor, as_completed
+                                with ThreadPoolExecutor(max_workers=int(_workers)) as ex:
+                                    futures = {
+                                        ex.submit(_run_one_compile, src): (table, img, src)
+                                        for (table, img, src) in to_process
+                                    }
+                                    for i, fut in enumerate(as_completed(futures), 1):
+                                        table, img, src = futures[fut]
+                                        success, log, pdf_path = fut.result()
+                                        if success:
+                                            ok += 1
+                                            if pdf_path:
+                                                pdfs.append((table, img, pdf_path))
+                                        else:
+                                            failed += 1
+                                            if log:
+                                                logs.append(f"{table}/{img}: {log}")
+                                        progress.progress(i / total)
+                            else:
+                                for idx, (table, img, src) in enumerate(to_process, 1):
+                                    success, log, pdf_path = _run_one_compile(src)
+                                    if success:
+                                        ok += 1
+                                        if pdf_path:
+                                            pdfs.append((table, img, pdf_path))
+                                    else:
+                                        failed += 1
+                                        if log:
+                                            logs.append(f"{table}/{img}: {log}")
+                                    progress.progress(idx / total)
+
+                            if failed == 0:
+                                st.success(
+                                    f"Completed: {ok}/{total} PDFs generated. Missing TSV/CSV: {missing_sources}; missing PDFs: {missing_pdfs}."
+                                )
+                            else:
+                                st.warning(
+                                    f"Completed with errors: success={ok}, failed={failed}, total={total}. Missing TSV/CSV: {missing_sources}; missing PDFs: {missing_pdfs}."
+                                )
+                                if logs:
+                                    with st.expander("Show errors/logs", expanded=False):
+                                        st.code("\n\n".join(logs), language="text")
+
+                            if pdfs:
+                                with st.expander("Generated PDFs", expanded=False):
+                                    for table, img, pdf_path in pdfs:
+                                        st.markdown(f"- {table}/{img}: `{pdf_path}`")
+                except Exception as e:
+                    st.error(f"Batch generation failed: {e}")
+
+            st.markdown("---")
+            # Sync DB validation state to JSON files (dangerous)
+            st.markdown("**Overwrite JSON Files from Database**")
+            st.warning("⚠️ IRREVERSIBLE: Overwrites all validation_db.json files with DB state.")
+            sync_confirmed = st.checkbox(
+                "I understand this will permanently overwrite all validation_db.json files",
+                key="sidebar_sync_confirm",
+            )
+            if st.button(
+                "🔄 Overwrite JSON Files from Database",
+                disabled=not sync_confirmed,
+                use_container_width=True,
+                key="sidebar_sync_btn",
+            ):
+                try:
+                    from tools.rebuild_db import sync_db_validation_to_json_files
+
+                    sync_db_validation_to_json_files()
+                    st.success("Synced database validation state to JSON files!")
+                except Exception as e:
+                    st.error(f"Sync failed: {e}")
+        else:
+            st.info("Admin tools are restricted to the owner account.")
 
     # Ensure BASE_DIR exists
     os.makedirs(BASE_DIR, exist_ok=True)

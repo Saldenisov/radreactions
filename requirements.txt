@@ -13,3 +13,5 @@ typing-extensions
 passlib[bcrypt]
 # dev
 ruff
+# ai
+openai>=1.44.0
