@@ -320,11 +320,18 @@ def main():
                 help="Process all tables or limit to a single table",
                 key="batch_scope",
             )
-            _include_missing_pdfs = st.checkbox(
-                "Include items with missing PDF",
-                value=True,
-                help="Process images where the compiled PDF is not present",
-                key="include_missing_pdfs",
+            _processing_mode = st.selectbox(
+                "Processing mode",
+                options=[
+                    "Untreated (unvalidated) only",
+                    "Treated (validated) only",
+                    "Missing PDF only",
+                    "Untreated + Missing PDF",
+                    "All items",
+                ],
+                index=3,  # Default to "Untreated + Missing PDF"
+                help="Choose which items to process based on validation status and PDF existence",
+                key="batch_processing_mode",
             )
             _max_items = st.number_input(
                 "Max items (0 = no limit)",
@@ -391,7 +398,21 @@ def main():
                             validated = bool(meta.get("validated", False))
                             pdf_path = PDF_DIR / f"{stem}.pdf"
                             pdf_missing = not pdf_path.exists()
-                            if (not validated) or (_include_missing_pdfs and pdf_missing):
+
+                            # Determine if item should be processed based on selected mode
+                            should_process = False
+                            if _processing_mode == "Untreated (unvalidated) only":
+                                should_process = not validated
+                            elif _processing_mode == "Treated (validated) only":
+                                should_process = validated
+                            elif _processing_mode == "Missing PDF only":
+                                should_process = pdf_missing
+                            elif _processing_mode == "Untreated + Missing PDF":
+                                should_process = (not validated) or pdf_missing
+                            elif _processing_mode == "All items":
+                                should_process = True
+
+                            if should_process:
                                 to_process.append((table, img, source))
                                 if pdf_missing:
                                     missing_pdfs += 1
