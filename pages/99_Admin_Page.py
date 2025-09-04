@@ -1,7 +1,10 @@
-"""Admin page for uploading data ZIP files.
+"""Admin page for data management and maintenance operations.
 
-This page allows authenticated admin users to upload ZIP files containing
-table data that will be extracted to the data directory.
+This page provides authenticated admin users with tools for:
+- Uploading and managing data ZIP files
+- Database maintenance and rebuild operations
+- Batch processing of TSV/CSV files to LaTeX/PDF
+- Search and replace operations across tables
 """
 
 import io
@@ -233,7 +236,7 @@ def get_table_info(table_path: Path) -> dict:
 
 
 def main():
-    st.title("🔧 Admin: Upload & Export Data")
+    st.title("🔧 Admin Page")
 
     # Check authentication - only allow logged in users (basic admin check)
     try:
@@ -438,6 +441,7 @@ def main():
 
                             if _run_parallel and _workers and int(_workers) > 1:
                                 from concurrent.futures import ThreadPoolExecutor, as_completed
+
                                 with ThreadPoolExecutor(max_workers=int(_workers)) as ex:
                                     futures = {
                                         ex.submit(_run_one_compile, src): (table, img, src)
