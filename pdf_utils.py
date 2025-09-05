@@ -284,10 +284,13 @@ def escape_text_allow_ce(s: str) -> str:
     return out
 
 
-def tsv_to_full_latex_article(tsv_path):
+def tsv_to_full_latex_article(tsv_path, out_dir=None):
     tsv_path = Path(tsv_path)
-    latex_dir = tsv_path.parent / "latex"
-    latex_dir.mkdir(exist_ok=True)
+    if out_dir is None:
+        latex_dir = tsv_path.parent / "latex"
+    else:
+        latex_dir = Path(out_dir)
+    latex_dir.mkdir(parents=True, exist_ok=True)
     latex_path = latex_dir / (tsv_path.stem + ".tex")
 
     header = [

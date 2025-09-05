@@ -7,7 +7,7 @@ from typing import Any
 import streamlit as st
 from PIL import Image, UnidentifiedImageError
 
-from auth_db import show_user_profile_page
+from auth_db import show_user_profile_page, auth_db
 from config import AVAILABLE_TABLES, BASE_DIR, get_table_paths
 from pdf_utils import compile_tex_to_pdf, tsv_to_full_latex_article
 from tsv_utils import correct_tsv_file, tsv_to_visible, visible_to_tsv
@@ -238,6 +238,111 @@ def show_validation_interface(current_user):
     st.sidebar.markdown(f"### **Selected Table: {table_choice}**")
     st.sidebar.markdown(f"**Total images:** {table_total}")
     st.sidebar.markdown(f"**Validated:** {table_validated} ({table_percent:.1f}%)")
+
+    # Admin-only actions for the selected table
+    try:
+        _is_admin = auth_db.is_admin(current_user)
+    except Exception:
+        _is_admin = False
+
+    if _is_admin:
+        with st.sidebar.expander("🛠️ Admin: Table operations", expanded=False):
+            st.warning("These operations are destructive. Proceed with care.")
+
+            # Bulk Unvalidate form
+            with st.form(f"bulk_unvalidate_form_{table_choice}"):
+                confirm_unval = st.checkbox(
+                    f"Confirm: set ALL reactions in {table_choice} to Unvalidated",
+                    value=False,
+                )
+                do_unval = st.form_submit_button("Set all to Unvalidated")
+                if do_unval:
+                    if confirm_unval:
+                        try:
+                            tno = int(str(table_choice).replace("table", ""))
+                        except Exception:
+                            tno = None
+                        if tno is None:
+                            st.error("Could not determine table number")
+                        else:
+                            try:
+                                from reactions_db import bulk_unvalidate_table
+                                updated = bulk_unvalidate_table(con, tno)
+                                st.success(f"Unvalidated {updated} reaction(s) in {table_choice}.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Bulk unvalidate failed: {e}")
+                    else:
+                        st.error("Please tick the confirmation checkbox to proceed.")
+
+            # Full Refresh form
+            with st.form(f"refresh_table_form_{table_choice}"):
+                st.caption(
+                    "Refresh deletes all reactions and measurements for this table, then re-imports data."
+                )
+                import_all = st.checkbox(
+                    "Import all TSV/CSV (ignore validation JSON)", value=False
+                )
+                dry_run_only = st.checkbox("Dry-run preview only (no changes)", value=False)
+                confirm_refresh = st.checkbox(
+                    f"I understand data for {table_choice} will be deleted and rebuilt",
+                    value=False,
+                )
+                do_refresh = st.form_submit_button("Refresh DB for this table")
+                if do_refresh:
+                    try:
+                        tno = int(str(table_choice).replace("table", ""))
+                    except Exception:
+                        tno = None
+                    if tno is None:
+                        st.error("Could not determine table number")
+                    else:
+                        if dry_run_only:
+                            try:
+                                from reactions_db import get_table_row_counts
+                                from import_reactions import (
+                                    list_all_sources_for_table,
+                                    list_validated_sources_for_table,
+                                )
+                                counts = get_table_row_counts(con, tno)
+                                planned_sources = (
+                                    list_all_sources_for_table(tno)
+                                    if import_all
+                                    else list_validated_sources_for_table(tno)
+                                )
+                                st.info(
+                                    f"Dry-run: would delete {counts['reactions']} reactions and {counts['measurements']} measurements from {table_choice}."
+                                )
+                                st.info(
+                                    f"Dry-run: would import from {len(planned_sources)} source file(s) ({'all TSV/CSV' if import_all else 'validated entries only'})."
+                                )
+                            except Exception as e:
+                                st.error(f"Dry-run failed: {e}")
+                        else:
+                            if not confirm_refresh:
+                                st.error("Please tick the confirmation checkbox to proceed.")
+                            else:
+                                try:
+                                    from reactions_db import delete_table_data
+                                    stats = delete_table_data(con, tno)
+                                    if import_all:
+                                        from import_reactions import reimport_table_all_sources
+
+                                        summary2 = reimport_table_all_sources(tno)
+                                        st.success(
+                                            f"Refreshed {table_choice}. Deleted {stats['reactions_deleted']} reactions, ~{stats['measurements_deleted_estimate']} measurements. Imported {summary2['reactions_imported']} reactions from {summary2['sources']} sources."
+                                        )
+                                    else:
+                                        # Re-import only validated entries for this table
+                                        from import_reactions import sync_validations_to_db
+
+                                        summary = sync_validations_to_db(table_numbers=(tno,), dry_run=False)
+                                        st.success(
+                                            f"Refreshed {table_choice}. Deleted {stats['reactions_deleted']} reactions, ~{stats['measurements_deleted_estimate']} measurements. Re-imported {summary['imported_total']} sources and set {summary['updated_total']} validations."
+                                        )
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Refresh failed: {e}")
 
     filter_mode = st.sidebar.selectbox(
         "Show images:", options=["All", "Only unvalidated", "Only skipped"], index=0

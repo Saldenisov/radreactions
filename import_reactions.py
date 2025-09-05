@@ -211,7 +211,10 @@ def import_from_csvs(base_dir: Path | None = None, table_numbers=(5, 6, 7, 8, 9)
         csv_dir = TSV_DIR
         if not csv_dir.exists():
             continue
-        for csv_path in csv_dir.glob("*.csv"):
+        # Prefer .csv over .tsv for the same stem
+        seen: set[str] = set()
+        for csv_path in sorted(csv_dir.glob("*.csv")):
+            seen.add(csv_path.stem)
             try:
                 # Derive PNG by stem
                 stem = csv_path.stem
@@ -277,8 +280,141 @@ def import_from_csvs(base_dir: Path | None = None, table_numbers=(5, 6, 7, 8, 9)
             except Exception as e:
                 print(f"[IMPORT] Error processing {csv_path}: {e}")
                 continue
+        for tsv_path in sorted(csv_dir.glob("*.tsv")):
+            if tsv_path.stem in seen:
+                continue
+            try:
+                stem = tsv_path.stem
+                png_path = IMAGE_DIR / f"{stem}.png"
+                png_path_str = str(png_path) if png_path.exists() else None
+                with open(tsv_path, newline="", encoding="utf-8") as f:
+                    reader = csv.reader(f, delimiter="\t")
+                    rows = [r for r in reader]
+                if not rows:
+                    continue
+                r0 = rows[0] + [""] * (7 - len(rows[0]))
+                buxton_no = r0[0].strip() or None
+                reaction_name = r0[1].strip() or None
+                formula_latex = r0[2].strip() or None
+                rid = get_or_create_reaction(
+                    con,
+                    table_no=tno,
+                    buxton_reaction_number=buxton_no,
+                    reaction_name=reaction_name,
+                    formula_latex=formula_latex,
+                    notes=None,
+                    source_path=str(tsv_path),
+                    png_path=png_path_str,
+                )
+                inserted_reactions += 1
+                con.execute(
+                    "DELETE FROM measurements WHERE reaction_id = ? AND source_path = ?",
+                    (rid, str(tsv_path)),
+                )
+                for row in rows:
+                    row = row + [""] * (7 - len(row))
+                    pH = row[3].strip() or None
+                    rate_value = row[4].strip() or None
+                    comments = row[5].strip() or None
+                    references_field = row[6].strip() or None
+                    ref_id = upsert_reference(
+                        con,
+                        buxton_code=references_field
+                        if references_field and "," not in references_field
+                        else None,
+                        citation_text=None,
+                        doi=None,
+                        raw_text=references_field,
+                    )
+                    rate_num = parse_rate_value(rate_value) if rate_value else None
+                    add_measurement(
+                        con,
+                        rid,
+                        pH=pH,
+                        temperature_C=None,
+                        rate_value=rate_value or "",
+                        rate_value_num=rate_num,
+                        rate_units=None,
+                        method=None,
+                        conditions=comments,
+                        reference_id=ref_id,
+                        references_raw=references_field,
+                        source_path=str(tsv_path),
+                        page_info=None,
+                    )
+                    inserted_measurements += 1
+            except Exception as e:
+                print(f"[IMPORT] Error processing {tsv_path}: {e}")
+                continue
     con.commit()
     print(f"[IMPORT] Done. reactions~{inserted_reactions}, measurements={inserted_measurements}")
+
+
+def list_all_sources_for_table(table_no: int) -> list[Path]:
+    """List all .csv/.tsv sources for a table, preferring .csv when both exist."""
+    table_name = f"table{table_no}"
+    IMAGE_DIR, PDF_DIR, TSV_DIR, DB_PATH = get_table_paths(table_name)
+    sources: list[Path] = []
+    if not TSV_DIR.exists():
+        return sources
+    seen: set[str] = set()
+    for p in sorted(TSV_DIR.glob("*.csv")):
+        sources.append(p)
+        seen.add(p.stem)
+    for p in sorted(TSV_DIR.glob("*.tsv")):
+        if p.stem not in seen:
+            sources.append(p)
+    return sources
+
+
+def list_validated_sources_for_table(table_no: int) -> list[Path]:
+    """List sources for entries marked validated in validation_db.json (existing files only)."""
+    table_name = f"table{table_no}"
+    IMAGE_DIR, PDF_DIR, TSV_DIR, DB_JSON_PATH = get_table_paths(table_name)
+    sources: list[Path] = []
+    if not DB_JSON_PATH.exists():
+        return sources
+    try:
+        from db_utils import load_db
+
+        db = load_db(DB_JSON_PATH, IMAGE_DIR)
+    except Exception:
+        return sources
+    for img, meta in db.items():
+        if isinstance(meta, bool):
+            is_valid = bool(meta)
+        else:
+            is_valid = bool(meta.get("validated", False))
+        if not is_valid:
+            continue
+        stem = Path(img).stem
+        csv_candidate = TSV_DIR / f"{stem}.csv"
+        tsv_candidate = TSV_DIR / f"{stem}.tsv"
+        source_path = csv_candidate if csv_candidate.exists() else (tsv_candidate if tsv_candidate.exists() else None)
+        if source_path is not None:
+            sources.append(source_path)
+    return sources
+
+
+def reimport_table_all_sources(table_no: int) -> dict[str, int]:
+    """Delete nothing; import all sources for table into DB (idempotently).
+
+    Returns: {'sources': int, 'reactions_imported': int, 'measurements_imported': int}
+    """
+    con = ensure_db()
+    sources = list_all_sources_for_table(table_no)
+    reactions_total = 0
+    measurements_total = 0
+    for src in sources:
+        try:
+            rcount, mcount = import_single_csv_idempotent(src, table_no)
+            reactions_total += rcount or 0
+            measurements_total += mcount or 0
+        except Exception as e:
+            print(f"[REIMPORT_ALL] Failed {src}: {e}")
+            continue
+    con.commit()
+    return {"sources": len(sources), "reactions_imported": reactions_total, "measurements_imported": measurements_total}
 
 
 def sync_validations_to_db(table_numbers=(5, 6, 7, 8, 9), dry_run: bool = False) -> dict[str, Any]:

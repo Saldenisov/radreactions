@@ -606,6 +606,67 @@ def get_database_stats(con: sqlite3.Connection) -> dict[str, Any]:
     return {"totals": totals, "per_table": per_table}
 
 
+# ---------------- Admin helper operations -----------------
+
+def bulk_unvalidate_table(con: sqlite3.Connection, table_no: int) -> int:
+    """Set validated=0 and clear metadata for all reactions in a given table.
+
+    Returns the number of reaction rows updated.
+    """
+    cur = con.execute(
+        "UPDATE reactions SET validated = 0, validated_by = NULL, validated_at = NULL, updated_at = datetime('now') WHERE table_no = ?",
+        (table_no,),
+    )
+    con.commit()
+    return cur.rowcount
+
+
+def delete_table_data(con: sqlite3.Connection, table_no: int) -> dict[str, int]:
+    """Delete all reactions (and cascading measurements) for a table.
+
+    Returns a dict with counts: {'reactions_deleted': int, 'measurements_deleted_estimate': int}
+    The measurements count is estimated from a pre-delete join and may differ slightly if constraints change.
+    """
+    # Estimate measurements count before deletion
+    try:
+        mcount = int(
+            con.execute(
+                "SELECT COUNT(*) FROM measurements m JOIN reactions r ON r.id = m.reaction_id WHERE r.table_no = ?",
+                (table_no,),
+            ).fetchone()[0]
+        )
+    except Exception:
+        mcount = 0
+
+    cur = con.execute("DELETE FROM reactions WHERE table_no = ?", (table_no,))
+    rcount = cur.rowcount
+    con.commit()
+    return {"reactions_deleted": int(rcount or 0), "measurements_deleted_estimate": mcount}
+
+
+def get_table_row_counts(con: sqlite3.Connection, table_no: int) -> dict[str, int]:
+    """Return current counts for a table without modifying anything.
+
+    Returns: {'reactions': int, 'measurements': int}
+    """
+    try:
+        reactions = int(
+            con.execute("SELECT COUNT(*) FROM reactions WHERE table_no = ?", (table_no,)).fetchone()[0]
+        )
+    except Exception:
+        reactions = 0
+    try:
+        measurements = int(
+            con.execute(
+                "SELECT COUNT(*) FROM measurements m JOIN reactions r ON r.id = m.reaction_id WHERE r.table_no = ?",
+                (table_no,),
+            ).fetchone()[0]
+        )
+    except Exception:
+        measurements = 0
+    return {"reactions": reactions, "measurements": measurements}
+
+
 def canonicalize_source_path(p: str) -> str:
     try:
         base = Path(BASE_DIR).resolve()
