@@ -536,767 +536,866 @@ def main():
         else:
             st.info("Admin tools are restricted to the owner account.")
 
+    # Tabbed admin interface to reduce scrolling
+    tab_overview, tab_search, tab_export, tab_delete, tab_upload, tab_db = st.tabs(
+        ["Overview", "Search & Replace", "Export", "Delete", "Upload", "Database"]
+    )
+
     # Ensure BASE_DIR exists
     os.makedirs(BASE_DIR, exist_ok=True)
 
     # Show current data directory status
-    st.subheader("📁 Current Data Directory Status")
+    with tab_overview:
+        st.subheader("📁 Current Data Directory Status")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        try:
-            st.code(f"Target directory: {BASE_DIR.resolve()}")
-        except Exception:
-            st.code(f"Target directory: {BASE_DIR}")
+        col1, col2 = st.columns(2)
+        with col1:
+            try:
+                st.code(f"Target directory: {BASE_DIR.resolve()}")
+            except Exception:
+                st.code(f"Target directory: {BASE_DIR}")
 
-    with col2:
+        with col2:
+            if os.path.exists(BASE_DIR):
+                current_size = get_directory_size(BASE_DIR)
+                st.metric("Current Size", format_size(current_size))
+
+                # Show subdirectories
+                subdirs = [
+                    d
+                    for d in os.listdir(BASE_DIR)
+                    if os.path.isdir(os.path.join(BASE_DIR, d)) and not d.startswith(".")
+                ]
+
+                if subdirs:
+                    st.write("📊 **Tables found:**")
+                    for subdir in sorted(subdirs):
+                        subdir_path = os.path.join(BASE_DIR, subdir)
+                        subdir_size = get_directory_size(subdir_path)
+                        table_title = get_table_title(subdir_path)
+                        if table_title:
+                            st.write(
+                                f"  • `{subdir}` - **{table_title}** ({format_size(subdir_size)})"
+                            )
+                        else:
+                            st.write(f"  • `{subdir}` ({format_size(subdir_size)})")
+
+            else:
+                st.warning("Directory does not exist yet")
+
+        st.divider()
+
+    # Batch Search & Replace (Tables)
+    with tab_search:
+        st.subheader("🔎 Batch Search & Replace (Tables)")
+
+        # Discover tables
         if os.path.exists(BASE_DIR):
-            current_size = get_directory_size(BASE_DIR)
-            st.metric("Current Size", format_size(current_size))
-
-            # Show subdirectories
-            subdirs = [
+            available_tables = [
                 d
-                for d in os.listdir(BASE_DIR)
+                for d in sorted(os.listdir(BASE_DIR))
+                if os.path.isdir(os.path.join(BASE_DIR, d)) and not d.startswith(".")
+            ]
+        else:
+            available_tables = []
+
+        if not available_tables:
+            st.info("No tables available. Upload data first.")
+        else:
+            col_scope1, col_scope2 = st.columns([2, 1])
+            with col_scope1:
+                table_for_fr = st.selectbox(
+                    "Select table",
+                    options=available_tables,
+                    help="Choose a table folder to search & replace within",
+                )
+            with col_scope2:
+                auto_compile = st.checkbox(
+                    "Compile after apply",
+                    value=True,
+                    help="After replacing, correct TSV and recompile LaTeX/PDF for affected files",
+                )
+
+            st.caption("Enter pattern and options, then run a dry scan. Review results and apply.")
+            col_in1, col_in2, col_in3 = st.columns([2, 2, 2])
+            with col_in1:
+                fr_find = st.text_input("Find", key="admin_fr_find", placeholder="e.g. .OH")
+            with col_in2:
+                fr_repl = st.text_input(
+                    "Replace with", key="admin_fr_repl", placeholder="e.g. ^.OH"
+                )
+            with col_in3:
+                only_eq = st.checkbox(
+                    "Only Reaction equation column",
+                    value=False,
+                    help="Limit replacements to the 3rd column (reaction equation)",
+                )
+            col_opt1, col_opt2 = st.columns([1, 1])
+            with col_opt1:
+                regex = st.checkbox("Regex", value=False)
+            with col_opt2:
+                case_sensitive = st.checkbox("Case sensitive", value=True)
+
+            def _compile_pat_admin(pat: str):
+                import re as _re
+
+                if not pat:
+                    return None
+                flags = 0 if case_sensitive else _re.IGNORECASE
+                if regex:
+                    try:
+                        return _re.compile(pat, flags)
+                    except _re.error as e:
+                        st.warning(f"Invalid regex: {e}")
+                        return None
+                else:
+                    return _re.compile(_re.escape(pat), flags)
+
+            res_key = f"admin_fr_results_{table_for_fr}"
+            sel_key = f"admin_fr_selected_{table_for_fr}"
+
+            col_btn1, col_btn2 = st.columns([1, 3])
+            with col_btn1:
+                if st.button("Dry scan", type="primary"):
+                    try:
+                        from config import get_table_paths as _get_paths
+
+                        IMG_DIR, PDF_DIR, TSV_DIR, _ = _get_paths(table_for_fr)
+                    except Exception as e:
+                        st.error(f"Path error: {e}")
+                        TSV_DIR = None
+                    results: list[dict[str, object]] = []
+                    pat = _compile_pat_admin(fr_find)
+                    if TSV_DIR and pat:
+                        import re as _re
+
+                        images = sorted([p.name for p in IMG_DIR.glob("*.png")])
+                        for img in images:
+                            stem = Path(img).stem
+                            csv_p = TSV_DIR / f"{stem}.csv"
+                            if not csv_p.exists():
+                                continue
+                            try:
+                                text_i = csv_p.read_text(encoding="utf-8")
+                            except Exception:
+                                continue
+                            matches = 0
+                            new_text_i = text_i
+                            try:
+                                if only_eq:
+                                    new_lines: list[str] = []
+                                    for ln in text_i.split("\n"):
+                                        if not ln:
+                                            new_lines.append(ln)
+                                            continue
+                                        cols = ln.split("\t")
+                                        if len(cols) >= 3:
+                                            old = cols[2]
+                                            matches += len(list(pat.finditer(old)))
+                                            cols[2] = pat.sub(lambda _m: fr_repl, old)
+                                            ln = "\t".join(cols)
+                                        new_lines.append(ln)
+                                    new_text_i = "\n".join(new_lines)
+                                else:
+                                    matches = len(list(pat.finditer(text_i)))
+                                    new_text_i = pat.sub(lambda _m: fr_repl, text_i)
+                            except _re.error as _e:
+                                st.warning(f"Regex error in {csv_p.name}: {_e}")
+                                continue
+                            if matches > 0 and new_text_i != text_i:
+                                results.append(
+                                    {
+                                        "path": str(csv_p),
+                                        "file": csv_p.name,
+                                        "matches": matches,
+                                        "new": new_text_i,
+                                    }
+                                )
+                    st.session_state[res_key] = results
+                    st.session_state[sel_key] = {r["path"] for r in results}
+            with col_btn2:
+                st.caption("Dry scan lists impacted files without changing anything.")
+
+            results2 = list(st.session_state.get(res_key, []))
+            if results2:
+                total_found = len(results2)
+                st.info(f"Found {total_found} files with matches in {table_for_fr}.")
+
+                # Pagination (20 per page)
+                PAGE_SIZE = 20
+                page_key = f"admin_fr_page_{table_for_fr}"
+                if page_key not in st.session_state:
+                    st.session_state[page_key] = 0
+                total_pages = max(1, (total_found + PAGE_SIZE - 1) // PAGE_SIZE)
+                # Clamp
+                st.session_state[page_key] = max(
+                    0, min(st.session_state[page_key], total_pages - 1)
+                )
+                cur_page = st.session_state[page_key]
+                start_idx = cur_page * PAGE_SIZE
+                end_idx = min(start_idx + PAGE_SIZE, total_found)
+                page_results = results2[start_idx:end_idx]
+
+                # Page controls
+                pc1, pc2, pc3 = st.columns([1, 2, 1])
+                with pc1:
+                    if st.button("◀ Prev", disabled=(cur_page == 0)):
+                        st.session_state[page_key] = max(0, cur_page - 1)
+                        st.rerun()
+                with pc2:
+                    st.write(f"Page {cur_page + 1}/{total_pages}  ")
+                    st.caption(f"Showing {start_idx + 1}-{end_idx} of {total_found}")
+                with pc3:
+                    if st.button("Next ▶", disabled=(cur_page >= total_pages - 1)):
+                        st.session_state[page_key] = min(total_pages - 1, cur_page + 1)
+                        st.rerun()
+
+                # selection controls
+                sel_all_key = f"admin_fr_select_all_{table_for_fr}"
+                sel_set = set(st.session_state.get(sel_key, set()))
+                chk_all, _ = st.columns([1, 3])
+                with chk_all:
+                    if st.checkbox("Select all (all pages)", key=sel_all_key, value=True):
+                        sel_set = {r["path"] for r in results2}
+                    else:
+                        pass
+
+                # Per-file checkboxes (current page), with CSV preview on click (expander)
+                for r in page_results:
+                    p = str(r["path"])  # noqa: F722
+                    fname = str(r["file"])  # noqa: F722
+                    mcount = int(r["matches"])  # noqa: F722
+                    row_cols = st.columns([1, 3])
+                    with row_cols[0]:
+                        ck = st.checkbox(
+                            "Select",
+                            key=f"admin_fr_sel_{table_for_fr}_{fname}",
+                            value=(p in sel_set),
+                        )
+                        if ck:
+                            sel_set.add(p)
+                        else:
+                            sel_set.discard(p)
+                    with row_cols[1]:
+                        with st.expander(f"{fname} — {mcount} matches (click to view CSV)"):
+                            try:
+                                csv_text = Path(p).read_text(encoding="utf-8")
+                            except Exception as e:
+                                csv_text = f"<error reading file: {e}>"
+                            st.code(csv_text, language="text")
+                st.session_state[sel_key] = sel_set
+
+                # Parallel options
+                opt1, opt2 = st.columns([1, 1])
+                with opt1:
+                    run_parallel = st.checkbox(
+                        "Run in parallel", value=True, key=f"admin_fr_parallel_{table_for_fr}"
+                    )
+                with opt2:
+                    if run_parallel:
+                        try:
+                            import os as _os_mod
+
+                            default_workers = _os_mod.cpu_count() or 4
+                        except Exception:
+                            default_workers = 4
+                        workers = st.number_input(
+                            "Workers",
+                            min_value=1,
+                            max_value=64,
+                            value=int(default_workers),
+                            step=1,
+                            key=f"admin_fr_workers_{table_for_fr}",
+                        )
+                    else:
+                        workers = 1
+
+                app1, app2 = st.columns([1, 1])
+                with app1:
+                    if st.button("Apply to selected", type="secondary"):
+                        try:
+                            from pdf_utils import (
+                                compile_tex_to_pdf as compile_fn,
+                            )
+                            from pdf_utils import (
+                                tsv_to_full_latex_article as to_tex_fn,
+                            )
+                            from tsv_utils import correct_tsv_file as correct_fn
+
+                            have_tools = True
+                        except Exception as e:
+                            st.error(f"Import error: {e}")
+                            have_tools = False
+
+                        # Prepare tasks
+                        tasks = [
+                            (str(r["path"]), str(r["new"]))
+                            for r in results2
+                            if str(r["path"]) in sel_set
+                        ]
+                        applied = 0
+                        logs = []
+
+                        def _apply_one(_p: str, _new: str):
+                            _csvp = Path(_p)
+                            try:
+                                _csvp.write_text(_new, encoding="utf-8")
+                                if have_tools:
+                                    correct_fn(_csvp)
+                                if have_tools and auto_compile:
+                                    lp = to_tex_fn(_csvp)
+                                    compile_fn(lp)
+                                return True, ""
+                            except Exception as _e:
+                                return False, f"Failed {Path(_p).name}: {_e}"
+
+                        if run_parallel and workers > 1 and tasks:
+                            try:
+                                from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                                with ThreadPoolExecutor(max_workers=int(workers)) as ex:
+                                    futs = {
+                                        ex.submit(_apply_one, pth, new): (pth, new)
+                                        for (pth, new) in tasks
+                                    }
+                                    for ft in as_completed(futs):
+                                        ok, msg = ft.result()
+                                        if ok:
+                                            applied += 1
+                                        elif msg:
+                                            logs.append(msg)
+                            except Exception as e:
+                                logs.append(f"Parallel execution error: {e}")
+                                # fallback sequential
+                                for pth, new in tasks:
+                                    ok, msg = _apply_one(pth, new)
+                                    if ok:
+                                        applied += 1
+                                    elif msg:
+                                        logs.append(msg)
+                        else:
+                            for pth, new in tasks:
+                                ok, msg = _apply_one(pth, new)
+                                if ok:
+                                    applied += 1
+                                elif msg:
+                                    logs.append(msg)
+
+                        if logs:
+                            with st.expander("Show errors/logs", expanded=False):
+                                st.code("\n".join(logs), language="text")
+                        st.success(f"Applied to {applied} files in {table_for_fr}.")
+                        st.rerun()
+                with app2:
+                    if st.button("Apply to all", type="secondary"):
+                        try:
+                            from pdf_utils import (
+                                compile_tex_to_pdf as compile_fn,
+                            )
+                            from pdf_utils import (
+                                tsv_to_full_latex_article as to_tex_fn,
+                            )
+                            from tsv_utils import correct_tsv_file as correct_fn
+
+                            have_tools = True
+                        except Exception as e:
+                            st.error(f"Import error: {e}")
+                            have_tools = False
+
+                        tasks = [(str(r["path"]), str(r["new"])) for r in results2]
+                        applied = 0
+                        logs = []
+
+                        def _apply_one(_p: str, _new: str):
+                            _csvp = Path(_p)
+                            try:
+                                _csvp.write_text(_new, encoding="utf-8")
+                                if have_tools:
+                                    correct_fn(_csvp)
+                                if have_tools and auto_compile:
+                                    lp = to_tex_fn(_csvp)
+                                    compile_fn(lp)
+                                return True, ""
+                            except Exception as _e:
+                                return False, f"Failed {Path(_p).name}: {_e}"
+
+                        if run_parallel and workers > 1 and tasks:
+                            try:
+                                from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                                with ThreadPoolExecutor(max_workers=int(workers)) as ex:
+                                    futs = {
+                                        ex.submit(_apply_one, pth, new): (pth, new)
+                                        for (pth, new) in tasks
+                                    }
+                                    for ft in as_completed(futs):
+                                        ok, msg = ft.result()
+                                        if ok:
+                                            applied += 1
+                                        elif msg:
+                                            logs.append(msg)
+                            except Exception as e:
+                                logs.append(f"Parallel execution error: {e}")
+                                for pth, new in tasks:
+                                    ok, msg = _apply_one(pth, new)
+                                    if ok:
+                                        applied += 1
+                                    elif msg:
+                                        logs.append(msg)
+                        else:
+                            for pth, new in tasks:
+                                ok, msg = _apply_one(pth, new)
+                                if ok:
+                                    applied += 1
+                                elif msg:
+                                    logs.append(msg)
+
+                        if logs:
+                            with st.expander("Show errors/logs", expanded=False):
+                                st.code("\n".join(logs), language="text")
+                        st.success(f"Applied to {applied} files in {table_for_fr}.")
+                        st.rerun()
+
+            st.markdown("---")
+            st.markdown("**Quick Fix: Replace .OH → ^.OH in Reaction equation (entire table)**")
+            qf_col1, qf_col2 = st.columns([1, 1])
+            with qf_col1:
+                if st.button("Dry scan quick fix"):
+                    try:
+                        from config import get_table_paths as _get_paths
+
+                        IMG_DIR, PDF_DIR, TSV_DIR, _ = _get_paths(table_for_fr)
+                    except Exception as e:
+                        st.error(f"Path error: {e}")
+                        TSV_DIR = None
+                    results_qf: list[dict[str, object]] = []
+                    if TSV_DIR:
+                        images = sorted([p.name for p in IMG_DIR.glob("*.png")])
+                        for img in images:
+                            stem = Path(img).stem
+                            csv_p = TSV_DIR / f"{stem}.csv"
+                            if not csv_p.exists():
+                                continue
+                            try:
+                                text_i = csv_p.read_text(encoding="utf-8")
+                            except Exception:
+                                continue
+                            matches = 0
+                            new_lines_qf: list[str] = []
+                            for ln in text_i.split("\n"):
+                                if not ln:
+                                    new_lines_qf.append(ln)
+                                    continue
+                                cols = ln.split("\t")
+                                if len(cols) >= 3:
+                                    old = cols[2]
+                                    cnt = old.count(".OH")
+                                    if cnt:
+                                        matches += cnt
+                                        cols[2] = old.replace(".OH", "^.OH")
+                                        ln = "\t".join(cols)
+                                new_lines_qf.append(ln)
+                            if matches > 0:
+                                results_qf.append(
+                                    {
+                                        "path": str(csv_p),
+                                        "file": csv_p.name,
+                                        "matches": matches,
+                                        "new": "\n".join(new_lines_qf),
+                                    }
+                                )
+                    st.session_state[res_key] = results_qf
+                    st.session_state[sel_key] = {r["path"] for r in results_qf}
+            with qf_col2:
+                if st.button("Apply quick fix to all"):
+                    res_qf2 = list(st.session_state.get(res_key, []))
+                    if not res_qf2:
+                        st.info("No scanned results. Click 'Dry scan quick fix' first.")
+                    else:
+                        try:
+                            from pdf_utils import (
+                                compile_tex_to_pdf as compile_fn,
+                            )
+                            from pdf_utils import (
+                                tsv_to_full_latex_article as to_tex_fn,
+                            )
+                            from tsv_utils import correct_tsv_file as correct_fn
+
+                            have_tools = True
+                        except Exception as e:
+                            st.error(f"Import error: {e}")
+                            have_tools = False
+
+                        # Parallel options reuse
+                        run_parallel = st.session_state.get(
+                            f"admin_fr_parallel_{table_for_fr}", True
+                        )
+                        workers = int(st.session_state.get(f"admin_fr_workers_{table_for_fr}", 4))
+
+                        tasks = [(str(r["path"]), str(r["new"])) for r in res_qf2]
+                        applied = 0
+                        logs = []
+
+                        def _apply_one(_p: str, _new: str):
+                            _csvp = Path(_p)
+                            try:
+                                _csvp.write_text(_new, encoding="utf-8")
+                                if have_tools:
+                                    correct_fn(_csvp)
+                                if have_tools and auto_compile:
+                                    lp = to_tex_fn(_csvp)
+                                    compile_fn(lp)
+                                return True, ""
+                            except Exception as _e:
+                                return False, f"Failed {Path(_p).name}: {_e}"
+
+                        if run_parallel and workers > 1 and tasks:
+                            try:
+                                from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                                with ThreadPoolExecutor(max_workers=int(workers)) as ex:
+                                    futs = {
+                                        ex.submit(_apply_one, pth, new): (pth, new)
+                                        for (pth, new) in tasks
+                                    }
+                                    for ft in as_completed(futs):
+                                        ok, msg = ft.result()
+                                        if ok:
+                                            applied += 1
+                                        elif msg:
+                                            logs.append(msg)
+                            except Exception as e:
+                                logs.append(f"Parallel execution error: {e}")
+                                for pth, new in tasks:
+                                    ok, msg = _apply_one(pth, new)
+                                    if ok:
+                                        applied += 1
+                                    elif msg:
+                                        logs.append(msg)
+                        else:
+                            for pth, new in tasks:
+                                ok, msg = _apply_one(pth, new)
+                                if ok:
+                                    applied += 1
+                                elif msg:
+                                    logs.append(msg)
+
+                        if logs:
+                            with st.expander("Show errors/logs", expanded=False):
+                                st.code("\n".join(logs), language="text")
+                        st.success(f"Quick fix applied to {applied} files in {table_for_fr}.")
+
+    # Export section - placed before delete for better workflow
+    with tab_export:
+        st.subheader("📥 Export Table Data")
+
+        # Get available tables
+        available_tables = []
+        if os.path.exists(BASE_DIR):
+            available_tables = [
+                d
+                for d in sorted(os.listdir(BASE_DIR))
                 if os.path.isdir(os.path.join(BASE_DIR, d)) and not d.startswith(".")
             ]
 
-            if subdirs:
-                st.write("📊 **Tables found:**")
-                for subdir in sorted(subdirs):
-                    subdir_path = os.path.join(BASE_DIR, subdir)
-                    subdir_size = get_directory_size(subdir_path)
-                    table_title = get_table_title(subdir_path)
-                    if table_title:
-                        st.write(f"  • `{subdir}` - **{table_title}** ({format_size(subdir_size)})")
-                    else:
-                        st.write(f"  • `{subdir}` ({format_size(subdir_size)})")
-
+        if not available_tables:
+            st.info("No tables available to export. Upload data first.")
         else:
-            st.warning("Directory does not exist yet")
+            # Display table information
+            st.write(f"📋 **Available tables ({len(available_tables)}):**")
 
-    st.divider()
+            table_infos = []
+            for table in available_tables:
+                table_path = Path(BASE_DIR) / table
+                info = get_table_info(table_path)
+                table_infos.append(info)
 
-    # Batch Search & Replace (Tables)
-    st.subheader("🔎 Batch Search & Replace (Tables)")
-
-    # Discover tables
-    if os.path.exists(BASE_DIR):
-        available_tables = [
-            d
-            for d in sorted(os.listdir(BASE_DIR))
-            if os.path.isdir(os.path.join(BASE_DIR, d)) and not d.startswith(".")
-        ]
-    else:
-        available_tables = []
-
-    if not available_tables:
-        st.info("No tables available. Upload data first.")
-    else:
-        col_scope1, col_scope2 = st.columns([2, 1])
-        with col_scope1:
-            table_for_fr = st.selectbox(
-                "Select table",
-                options=available_tables,
-                help="Choose a table folder to search & replace within",
-            )
-        with col_scope2:
-            auto_compile = st.checkbox(
-                "Compile after apply",
-                value=True,
-                help="After replacing, correct TSV and recompile LaTeX/PDF for affected files",
-            )
-
-        st.caption("Enter pattern and options, then run a dry scan. Review results and apply.")
-        col_in1, col_in2, col_in3 = st.columns([2, 2, 2])
-        with col_in1:
-            fr_find = st.text_input("Find", key="admin_fr_find", placeholder="e.g. .OH")
-        with col_in2:
-            fr_repl = st.text_input("Replace with", key="admin_fr_repl", placeholder="e.g. ^.OH")
-        with col_in3:
-            only_eq = st.checkbox(
-                "Only Reaction equation column",
-                value=False,
-                help="Limit replacements to the 3rd column (reaction equation)",
-            )
-        col_opt1, col_opt2 = st.columns([1, 1])
-        with col_opt1:
-            regex = st.checkbox("Regex", value=False)
-        with col_opt2:
-            case_sensitive = st.checkbox("Case sensitive", value=True)
-
-        def _compile_pat_admin(pat: str):
-            import re as _re
-
-            if not pat:
-                return None
-            flags = 0 if case_sensitive else _re.IGNORECASE
-            if regex:
-                try:
-                    return _re.compile(pat, flags)
-                except _re.error as e:
-                    st.warning(f"Invalid regex: {e}")
-                    return None
-            else:
-                return _re.compile(_re.escape(pat), flags)
-
-        res_key = f"admin_fr_results_{table_for_fr}"
-        sel_key = f"admin_fr_selected_{table_for_fr}"
-
-        col_btn1, col_btn2 = st.columns([1, 3])
-        with col_btn1:
-            if st.button("Dry scan", type="primary"):
-                try:
-                    from config import get_table_paths as _get_paths
-
-                    IMG_DIR, PDF_DIR, TSV_DIR, _ = _get_paths(table_for_fr)
-                except Exception as e:
-                    st.error(f"Path error: {e}")
-                    TSV_DIR = None
-                results: list[dict[str, object]] = []
-                pat = _compile_pat_admin(fr_find)
-                if TSV_DIR and pat:
-                    import re as _re
-
-                    images = sorted([p.name for p in IMG_DIR.glob("*.png")])
-                    for img in images:
-                        stem = Path(img).stem
-                        csv_p = TSV_DIR / f"{stem}.csv"
-                        if not csv_p.exists():
-                            continue
-                        try:
-                            text_i = csv_p.read_text(encoding="utf-8")
-                        except Exception:
-                            continue
-                        matches = 0
-                        new_text_i = text_i
-                        try:
-                            if only_eq:
-                                new_lines: list[str] = []
-                                for ln in text_i.split("\n"):
-                                    if not ln:
-                                        new_lines.append(ln)
-                                        continue
-                                    cols = ln.split("\t")
-                                    if len(cols) >= 3:
-                                        old = cols[2]
-                                        matches += len(list(pat.finditer(old)))
-                                        cols[2] = pat.sub(lambda _m: fr_repl, old)
-                                        ln = "\t".join(cols)
-                                    new_lines.append(ln)
-                                new_text_i = "\n".join(new_lines)
-                            else:
-                                matches = len(list(pat.finditer(text_i)))
-                                new_text_i = pat.sub(lambda _m: fr_repl, text_i)
-                        except _re.error as _e:
-                            st.warning(f"Regex error in {csv_p.name}: {_e}")
-                            continue
-                        if matches > 0 and new_text_i != text_i:
-                            results.append(
-                                {
-                                    "path": str(csv_p),
-                                    "file": csv_p.name,
-                                    "matches": matches,
-                                    "new": new_text_i,
-                                }
-                            )
-                st.session_state[res_key] = results
-                st.session_state[sel_key] = {r["path"] for r in results}
-        with col_btn2:
-            st.caption("Dry scan lists impacted files without changing anything.")
-
-        results2 = list(st.session_state.get(res_key, []))
-        if results2:
-            total_found = len(results2)
-            st.info(f"Found {total_found} files with matches in {table_for_fr}.")
-
-            # Pagination (20 per page)
-            PAGE_SIZE = 20
-            page_key = f"admin_fr_page_{table_for_fr}"
-            if page_key not in st.session_state:
-                st.session_state[page_key] = 0
-            total_pages = max(1, (total_found + PAGE_SIZE - 1) // PAGE_SIZE)
-            # Clamp
-            st.session_state[page_key] = max(0, min(st.session_state[page_key], total_pages - 1))
-            cur_page = st.session_state[page_key]
-            start_idx = cur_page * PAGE_SIZE
-            end_idx = min(start_idx + PAGE_SIZE, total_found)
-            page_results = results2[start_idx:end_idx]
-
-            # Page controls
-            pc1, pc2, pc3 = st.columns([1, 2, 1])
-            with pc1:
-                if st.button("◀ Prev", disabled=(cur_page == 0)):
-                    st.session_state[page_key] = max(0, cur_page - 1)
-                    st.rerun()
-            with pc2:
-                st.write(f"Page {cur_page + 1}/{total_pages}  ")
-                st.caption(f"Showing {start_idx + 1}-{end_idx} of {total_found}")
-            with pc3:
-                if st.button("Next ▶", disabled=(cur_page >= total_pages - 1)):
-                    st.session_state[page_key] = min(total_pages - 1, cur_page + 1)
-                    st.rerun()
-
-            # selection controls
-            sel_all_key = f"admin_fr_select_all_{table_for_fr}"
-            sel_set = set(st.session_state.get(sel_key, set()))
-            chk_all, _ = st.columns([1, 3])
-            with chk_all:
-                if st.checkbox("Select all (all pages)", key=sel_all_key, value=True):
-                    sel_set = {r["path"] for r in results2}
-                else:
-                    pass
-
-            # Per-file checkboxes (current page), with CSV preview on click (expander)
-            for r in page_results:
-                p = str(r["path"])  # noqa: F722
-                fname = str(r["file"])  # noqa: F722
-                mcount = int(r["matches"])  # noqa: F722
-                row_cols = st.columns([1, 3])
-                with row_cols[0]:
-                    ck = st.checkbox(
-                        "Select",
-                        key=f"admin_fr_sel_{table_for_fr}_{fname}",
-                        value=(p in sel_set),
-                    )
-                    if ck:
-                        sel_set.add(p)
-                    else:
-                        sel_set.discard(p)
-                with row_cols[1]:
-                    with st.expander(f"{fname} — {mcount} matches (click to view CSV)"):
-                        try:
-                            csv_text = Path(p).read_text(encoding="utf-8")
-                        except Exception as e:
-                            csv_text = f"<error reading file: {e}>"
-                        st.code(csv_text, language="text")
-            st.session_state[sel_key] = sel_set
-
-            # Parallel options
-            opt1, opt2 = st.columns([1, 1])
-            with opt1:
-                run_parallel = st.checkbox(
-                    "Run in parallel", value=True, key=f"admin_fr_parallel_{table_for_fr}"
-                )
-            with opt2:
-                if run_parallel:
-                    try:
-                        import os as _os_mod
-
-                        default_workers = _os_mod.cpu_count() or 4
-                    except Exception:
-                        default_workers = 4
-                    workers = st.number_input(
-                        "Workers",
-                        min_value=1,
-                        max_value=64,
-                        value=int(default_workers),
-                        step=1,
-                        key=f"admin_fr_workers_{table_for_fr}",
-                    )
-                else:
-                    workers = 1
-
-            app1, app2 = st.columns([1, 1])
-            with app1:
-                if st.button("Apply to selected", type="secondary"):
-                    try:
-                        from pdf_utils import (
-                            compile_tex_to_pdf as compile_fn,
-                        )
-                        from pdf_utils import (
-                            tsv_to_full_latex_article as to_tex_fn,
-                        )
-                        from tsv_utils import correct_tsv_file as correct_fn
-
-                        have_tools = True
-                    except Exception as e:
-                        st.error(f"Import error: {e}")
-                        have_tools = False
-
-                    # Prepare tasks
-                    tasks = [
-                        (str(r["path"]), str(r["new"]))
-                        for r in results2
-                        if str(r["path"]) in sel_set
-                    ]
-                    applied = 0
-                    logs = []
-
-                    def _apply_one(_p: str, _new: str):
-                        _csvp = Path(_p)
-                        try:
-                            _csvp.write_text(_new, encoding="utf-8")
-                            if have_tools:
-                                correct_fn(_csvp)
-                            if have_tools and auto_compile:
-                                lp = to_tex_fn(_csvp)
-                                compile_fn(lp)
-                            return True, ""
-                        except Exception as _e:
-                            return False, f"Failed {Path(_p).name}: {_e}"
-
-                    if run_parallel and workers > 1 and tasks:
-                        try:
-                            from concurrent.futures import ThreadPoolExecutor, as_completed
-
-                            with ThreadPoolExecutor(max_workers=int(workers)) as ex:
-                                futs = {
-                                    ex.submit(_apply_one, pth, new): (pth, new)
-                                    for (pth, new) in tasks
-                                }
-                                for ft in as_completed(futs):
-                                    ok, msg = ft.result()
-                                    if ok:
-                                        applied += 1
-                                    elif msg:
-                                        logs.append(msg)
-                        except Exception as e:
-                            logs.append(f"Parallel execution error: {e}")
-                            # fallback sequential
-                            for pth, new in tasks:
-                                ok, msg = _apply_one(pth, new)
-                                if ok:
-                                    applied += 1
-                                elif msg:
-                                    logs.append(msg)
-                    else:
-                        for pth, new in tasks:
-                            ok, msg = _apply_one(pth, new)
-                            if ok:
-                                applied += 1
-                            elif msg:
-                                logs.append(msg)
-
-                    if logs:
-                        with st.expander("Show errors/logs", expanded=False):
-                            st.code("\n".join(logs), language="text")
-                    st.success(f"Applied to {applied} files in {table_for_fr}.")
-                    st.rerun()
-            with app2:
-                if st.button("Apply to all", type="secondary"):
-                    try:
-                        from pdf_utils import (
-                            compile_tex_to_pdf as compile_fn,
-                        )
-                        from pdf_utils import (
-                            tsv_to_full_latex_article as to_tex_fn,
-                        )
-                        from tsv_utils import correct_tsv_file as correct_fn
-
-                        have_tools = True
-                    except Exception as e:
-                        st.error(f"Import error: {e}")
-                        have_tools = False
-
-                    tasks = [(str(r["path"]), str(r["new"])) for r in results2]
-                    applied = 0
-                    logs = []
-
-                    def _apply_one(_p: str, _new: str):
-                        _csvp = Path(_p)
-                        try:
-                            _csvp.write_text(_new, encoding="utf-8")
-                            if have_tools:
-                                correct_fn(_csvp)
-                            if have_tools and auto_compile:
-                                lp = to_tex_fn(_csvp)
-                                compile_fn(lp)
-                            return True, ""
-                        except Exception as _e:
-                            return False, f"Failed {Path(_p).name}: {_e}"
-
-                    if run_parallel and workers > 1 and tasks:
-                        try:
-                            from concurrent.futures import ThreadPoolExecutor, as_completed
-
-                            with ThreadPoolExecutor(max_workers=int(workers)) as ex:
-                                futs = {
-                                    ex.submit(_apply_one, pth, new): (pth, new)
-                                    for (pth, new) in tasks
-                                }
-                                for ft in as_completed(futs):
-                                    ok, msg = ft.result()
-                                    if ok:
-                                        applied += 1
-                                    elif msg:
-                                        logs.append(msg)
-                        except Exception as e:
-                            logs.append(f"Parallel execution error: {e}")
-                            for pth, new in tasks:
-                                ok, msg = _apply_one(pth, new)
-                                if ok:
-                                    applied += 1
-                                elif msg:
-                                    logs.append(msg)
-                    else:
-                        for pth, new in tasks:
-                            ok, msg = _apply_one(pth, new)
-                            if ok:
-                                applied += 1
-                            elif msg:
-                                logs.append(msg)
-
-                    if logs:
-                        with st.expander("Show errors/logs", expanded=False):
-                            st.code("\n".join(logs), language="text")
-                    st.success(f"Applied to {applied} files in {table_for_fr}.")
-                    st.rerun()
-
-        st.markdown("---")
-        st.markdown("**Quick Fix: Replace .OH → ^.OH in Reaction equation (entire table)**")
-        qf_col1, qf_col2 = st.columns([1, 1])
-        with qf_col1:
-            if st.button("Dry scan quick fix"):
-                try:
-                    from config import get_table_paths as _get_paths
-
-                    IMG_DIR, PDF_DIR, TSV_DIR, _ = _get_paths(table_for_fr)
-                except Exception as e:
-                    st.error(f"Path error: {e}")
-                    TSV_DIR = None
-                results_qf: list[dict[str, object]] = []
-                if TSV_DIR:
-                    images = sorted([p.name for p in IMG_DIR.glob("*.png")])
-                    for img in images:
-                        stem = Path(img).stem
-                        csv_p = TSV_DIR / f"{stem}.csv"
-                        if not csv_p.exists():
-                            continue
-                        try:
-                            text_i = csv_p.read_text(encoding="utf-8")
-                        except Exception:
-                            continue
-                        matches = 0
-                        new_lines_qf: list[str] = []
-                        for ln in text_i.split("\n"):
-                            if not ln:
-                                new_lines_qf.append(ln)
-                                continue
-                            cols = ln.split("\t")
-                            if len(cols) >= 3:
-                                old = cols[2]
-                                cnt = old.count(".OH")
-                                if cnt:
-                                    matches += cnt
-                                    cols[2] = old.replace(".OH", "^.OH")
-                                    ln = "\t".join(cols)
-                            new_lines_qf.append(ln)
-                        if matches > 0:
-                            results_qf.append(
-                                {
-                                    "path": str(csv_p),
-                                    "file": csv_p.name,
-                                    "matches": matches,
-                                    "new": "\n".join(new_lines_qf),
-                                }
-                            )
-                st.session_state[res_key] = results_qf
-                st.session_state[sel_key] = {r["path"] for r in results_qf}
-        with qf_col2:
-            if st.button("Apply quick fix to all"):
-                res_qf2 = list(st.session_state.get(res_key, []))
-                if not res_qf2:
-                    st.info("No scanned results. Click 'Dry scan quick fix' first.")
-                else:
-                    try:
-                        from pdf_utils import (
-                            compile_tex_to_pdf as compile_fn,
-                        )
-                        from pdf_utils import (
-                            tsv_to_full_latex_article as to_tex_fn,
-                        )
-                        from tsv_utils import correct_tsv_file as correct_fn
-
-                        have_tools = True
-                    except Exception as e:
-                        st.error(f"Import error: {e}")
-                        have_tools = False
-
-                    # Parallel options reuse
-                    run_parallel = st.session_state.get(f"admin_fr_parallel_{table_for_fr}", True)
-                    workers = int(st.session_state.get(f"admin_fr_workers_{table_for_fr}", 4))
-
-                    tasks = [(str(r["path"]), str(r["new"])) for r in res_qf2]
-                    applied = 0
-                    logs = []
-
-                    def _apply_one(_p: str, _new: str):
-                        _csvp = Path(_p)
-                        try:
-                            _csvp.write_text(_new, encoding="utf-8")
-                            if have_tools:
-                                correct_fn(_csvp)
-                            if have_tools and auto_compile:
-                                lp = to_tex_fn(_csvp)
-                                compile_fn(lp)
-                            return True, ""
-                        except Exception as _e:
-                            return False, f"Failed {Path(_p).name}: {_e}"
-
-                    if run_parallel and workers > 1 and tasks:
-                        try:
-                            from concurrent.futures import ThreadPoolExecutor, as_completed
-
-                            with ThreadPoolExecutor(max_workers=int(workers)) as ex:
-                                futs = {
-                                    ex.submit(_apply_one, pth, new): (pth, new)
-                                    for (pth, new) in tasks
-                                }
-                                for ft in as_completed(futs):
-                                    ok, msg = ft.result()
-                                    if ok:
-                                        applied += 1
-                                    elif msg:
-                                        logs.append(msg)
-                        except Exception as e:
-                            logs.append(f"Parallel execution error: {e}")
-                            for pth, new in tasks:
-                                ok, msg = _apply_one(pth, new)
-                                if ok:
-                                    applied += 1
-                                elif msg:
-                                    logs.append(msg)
-                    else:
-                        for pth, new in tasks:
-                            ok, msg = _apply_one(pth, new)
-                            if ok:
-                                applied += 1
-                            elif msg:
-                                logs.append(msg)
-
-                    if logs:
-                        with st.expander("Show errors/logs", expanded=False):
-                            st.code("\n".join(logs), language="text")
-                    st.success(f"Quick fix applied to {applied} files in {table_for_fr}.")
-
-    # Export section - placed before delete for better workflow
-    st.subheader("📥 Export Table Data")
-
-    # Get available tables
-    available_tables = []
-    if os.path.exists(BASE_DIR):
-        available_tables = [
-            d
-            for d in sorted(os.listdir(BASE_DIR))
-            if os.path.isdir(os.path.join(BASE_DIR, d)) and not d.startswith(".")
-        ]
-
-    if not available_tables:
-        st.info("No tables available to export. Upload data first.")
-    else:
-        # Display table information
-        st.write(f"📋 **Available tables ({len(available_tables)}):**")
-
-        table_infos = []
-        for table in available_tables:
-            table_path = Path(BASE_DIR) / table
-            info = get_table_info(table_path)
-            table_infos.append(info)
-
-            display_name = f"{info['name']}" + (f" - {info['title']}" if info["title"] else "")
-            st.write(
-                f"  • **{display_name}** ({format_size(info['size'])}, {info['file_count']} files)"
-            )
-
-        # Table selection for export
-        selected_export_tables = st.multiselect(
-            "Select tables to export",
-            options=available_tables,
-            help="Select one or more tables to download as a ZIP file",
-        )
-
-        if selected_export_tables:
-            # Options: CSV-only or full table content
-            csv_only = st.checkbox(
-                "Include only CSV files (recommended for syncing to local)",
-                value=True,
-                help="When enabled, exports only CSV files (and their parent folders) to keep the ZIP small. Disable to export images/latex too.",
-            )
-
-            # Show what will be exported
-            st.write("**Export will include:**")
-            total_size = 0
-            total_files = 0
-            for table in selected_export_tables:
-                info = next(t for t in table_infos if t["name"] == table)
-                total_size += info["size"]
-                total_files += info["file_count"]
-                display_name = table + (f" - {info['title']}" if info["title"] else "")
+                display_name = f"{info['name']}" + (f" - {info['title']}" if info["title"] else "")
                 st.write(
-                    f"  • {display_name} ({format_size(info['size'])}, {info['file_count']} files)"
+                    f"  • **{display_name}** ({format_size(info['size'])}, {info['file_count']} files)"
                 )
 
-            st.write(
-                f"**Total (full table sizes shown above; CSV-only ZIP will be smaller):** {format_size(total_size)}, {total_files} files"
+            # Table selection for export
+            selected_export_tables = st.multiselect(
+                "Select tables to export",
+                options=available_tables,
+                help="Select one or more tables to download as a ZIP file",
             )
 
-            # Export button
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            suffix = "csv_only" if csv_only else "full"
-            filename = f"table_export_{suffix}_{timestamp}.zip"
+            if selected_export_tables:
+                # Options: CSV-only or full table content
+                csv_only = st.checkbox(
+                    "Include only CSV files (recommended for syncing to local)",
+                    value=True,
+                    help="When enabled, exports only CSV files (and their parent folders) to keep the ZIP small. Disable to export images/latex too.",
+                )
 
-            if st.button("📦 Create Export ZIP", type="primary"):
-                try:
-                    with st.spinner("Creating export ZIP..."):
-                        zip_data = create_zip_from_tables(
-                            Path(BASE_DIR), selected_export_tables, csv_only=csv_only
+                # Show what will be exported
+                st.write("**Export will include:**")
+                total_size = 0
+                total_files = 0
+                for table in selected_export_tables:
+                    info = next(t for t in table_infos if t["name"] == table)
+                    total_size += info["size"]
+                    total_files += info["file_count"]
+                    display_name = table + (f" - {info['title']}" if info["title"] else "")
+                    st.write(
+                        f"  • {display_name} ({format_size(info['size'])}, {info['file_count']} files)"
+                    )
+
+                st.write(
+                    f"**Total (full table sizes shown above; CSV-only ZIP will be smaller):** {format_size(total_size)}, {total_files} files"
+                )
+
+                # Export button
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                suffix = "csv_only" if csv_only else "full"
+                filename = f"table_export_{suffix}_{timestamp}.zip"
+
+                if st.button("📦 Create Export ZIP", type="primary"):
+                    try:
+                        with st.spinner("Creating export ZIP..."):
+                            zip_data = create_zip_from_tables(
+                                Path(BASE_DIR), selected_export_tables, csv_only=csv_only
+                            )
+
+                        st.success(
+                            f"✅ Export ZIP created successfully! ({format_size(len(zip_data))})"
                         )
 
-                    st.success(
-                        f"✅ Export ZIP created successfully! ({format_size(len(zip_data))})"
-                    )
+                        # Download button
+                        st.download_button(
+                            label="⬇️ Download Export ZIP",
+                            data=zip_data,
+                            file_name=filename,
+                            mime="application/zip",
+                            help=f"Download {len(selected_export_tables)} selected tables ({'CSV-only' if csv_only else 'full content'})",
+                        )
 
-                    # Download button
-                    st.download_button(
-                        label="⬇️ Download Export ZIP",
-                        data=zip_data,
-                        file_name=filename,
-                        mime="application/zip",
-                        help=f"Download {len(selected_export_tables)} selected tables ({'CSV-only' if csv_only else 'full content'})",
-                    )
-
-                except Exception as e:
-                    st.error(f"❌ Error creating export: {str(e)}")
+                    except Exception as e:
+                        st.error(f"❌ Error creating export: {str(e)}")
 
     st.divider()
 
     # Delete specific folders section
-    st.subheader("🧹 Delete Specific Folders")
-    try:
-        subdirs_for_delete = [
-            d
-            for d in os.listdir(BASE_DIR)
-            if os.path.isdir(os.path.join(BASE_DIR, d)) and not d.startswith(".")
-        ]
-    except Exception:
-        subdirs_for_delete = []
+    with tab_delete:
+        st.subheader("🧹 Delete Specific Folders")
+        try:
+            subdirs_for_delete = [
+                d
+                for d in os.listdir(BASE_DIR)
+                if os.path.isdir(os.path.join(BASE_DIR, d)) and not d.startswith(".")
+            ]
+        except Exception:
+            subdirs_for_delete = []
 
-    if not subdirs_for_delete:
-        st.caption("No folders available to delete.")
-    else:
-        selected_folders = st.multiselect(
-            "Select folders to delete (permanent)",
-            options=sorted(subdirs_for_delete),
-            help="Deletes selected folders from the data directory permanently.",
-        )
+        if not subdirs_for_delete:
+            st.caption("No folders available to delete.")
+        else:
+            selected_folders = st.multiselect(
+                "Select folders to delete (permanent)",
+                options=sorted(subdirs_for_delete),
+                help="Deletes selected folders from the data directory permanently.",
+            )
 
-        if st.button("🗑️ Delete selected folders", type="secondary", disabled=not selected_folders):
-            any_deleted = False
-            messages: list[str] = []
-            for folder in selected_folders:
-                ok, msg = delete_folder_in_base(folder)
-                messages.append(f"{folder}: {'✅' if ok else '❌'} {msg}")
-                any_deleted = any_deleted or ok
+            if st.button(
+                "🗑️ Delete selected folders", type="secondary", disabled=not selected_folders
+            ):
+                any_deleted = False
+                messages: list[str] = []
+                for folder in selected_folders:
+                    ok, msg = delete_folder_in_base(folder)
+                    messages.append(f"{folder}: {'✅' if ok else '❌'} {msg}")
+                    any_deleted = any_deleted or ok
 
-            if any_deleted:
-                st.success("Some folders were deleted. Refreshing...")
-                for m in messages:
-                    st.write(m)
-                st.rerun()
-            else:
-                st.warning("No folders were deleted.")
-                for m in messages:
-                    st.write(m)
+                if any_deleted:
+                    st.success("Some folders were deleted. Refreshing...")
+                    for m in messages:
+                        st.write(m)
+                    st.rerun()
+                else:
+                    st.warning("No folders were deleted.")
+                    for m in messages:
+                        st.write(m)
 
     st.divider()
 
     # Upload section
-    st.subheader("📤 Upload Data ZIP File")
+    with tab_upload:
+        st.subheader("📤 Upload Data ZIP File")
 
-    st.info("""
-    **Upload Instructions:**
-    - Upload a ZIP file containing your table data directories
-    - The ZIP should contain folders like `Table5/`, `Table6/`, etc.
-    - Each table folder can optionally contain an `info.txt` file with format: `TITLE: Name of Table`
-    - If no `info.txt` file exists, the table name will be displayed without a title
-    - Maximum file size: 500 MB
-    - ⚠️ **Warning**: This will replace existing data in the target directory
-    """)
+        st.info("""
+        **Upload Instructions:**
+        - Upload a ZIP file containing your table data directories
+        - The ZIP should contain folders like `Table5/`, `Table6/`, etc.
+        - Each table folder can optionally contain an `info.txt` file with format: `TITLE: Name of Table`
+        - If no `info.txt` file exists, the table name will be displayed without a title
+        - Maximum file size: 500 MB
+        - ⚠️ **Warning**: This will replace existing data in the target directory
+        """)
 
-    uploaded_file = st.file_uploader(
-        "Choose a ZIP file containing table data",
-        type=["zip"],
-        help="Select a ZIP file with your data contents",
-    )
+        uploaded_file = st.file_uploader(
+            "Choose a ZIP file containing table data",
+            type=["zip"],
+            help="Select a ZIP file with your data contents",
+        )
 
-    if uploaded_file is not None:
-        file_size_mb = len(uploaded_file.getvalue()) / (1024 * 1024)
-        st.info(f"📦 **Uploaded file**: `{uploaded_file.name}` ({file_size_mb:.1f} MB)")
+        if uploaded_file is not None:
+            file_size_mb = len(uploaded_file.getvalue()) / (1024 * 1024)
+            st.info(f"📦 **Uploaded file**: `{uploaded_file.name}` ({file_size_mb:.1f} MB)")
 
-        # Show contents of ZIP file
-        try:
-            with zipfile.ZipFile(uploaded_file) as zf:
-                file_list = [f for f in zf.namelist() if not f.endswith("/")]
-                st.write(f"📋 **ZIP contains {len(file_list)} files**")
+            # Show contents of ZIP file
+            try:
+                with zipfile.ZipFile(uploaded_file) as zf:
+                    file_list = [f for f in zf.namelist() if not f.endswith("/")]
+                    st.write(f"📋 **ZIP contains {len(file_list)} files**")
 
-                # Show first few files as preview
-                if file_list:
-                    st.write("**Preview (first 10 files):**")
-                    for filename in file_list[:10]:
-                        st.write(f"  • `{filename}`")
-                    if len(file_list) > 10:
-                        st.write(f"  ... and {len(file_list) - 10} more files")
+                    # Show first few files as preview
+                    if file_list:
+                        st.write("**Preview (first 10 files):**")
+                        for filename in file_list[:10]:
+                            st.write(f"  • `{filename}`")
+                        if len(file_list) > 10:
+                            st.write(f"  ... and {len(file_list) - 10} more files")
 
-        except zipfile.BadZipFile:
-            st.error("❌ Invalid ZIP file. Please upload a valid ZIP archive.")
-            return
-        except Exception as e:
-            st.error(f"❌ Error reading ZIP file: {str(e)}")
-            return
+            except zipfile.BadZipFile:
+                st.error("❌ Invalid ZIP file. Please upload a valid ZIP archive.")
+                return
+            except Exception as e:
+                st.error(f"❌ Error reading ZIP file: {str(e)}")
+                return
 
-        # Confirmation and extraction
-        st.divider()
+            # Confirmation and extraction
+            st.divider()
 
-        col1, col2 = st.columns([1, 1])
+            col1, col2 = st.columns([1, 1])
 
-        with col1:
-            if st.button("🗑️ Clear Existing Data First", type="secondary"):
-                try:
-                    if os.path.exists(BASE_DIR):
-                        # Remove all contents but keep the directory
-                        for item in os.listdir(BASE_DIR):
-                            item_path = os.path.join(BASE_DIR, item)
-                            if os.path.isdir(item_path):
-                                shutil.rmtree(item_path)
-                            else:
-                                os.remove(item_path)
-                        st.success("✅ Existing data cleared successfully!")
+            with col1:
+                if st.button("🗑️ Clear Existing Data First", type="secondary"):
+                    try:
+                        if os.path.exists(BASE_DIR):
+                            # Remove all contents but keep the directory
+                            for item in os.listdir(BASE_DIR):
+                                item_path = os.path.join(BASE_DIR, item)
+                                if os.path.isdir(item_path):
+                                    shutil.rmtree(item_path)
+                                else:
+                                    os.remove(item_path)
+                            st.success("✅ Existing data cleared successfully!")
+                            st.rerun()
+                        else:
+                            st.info("ℹ️ Directory was already empty")
+                    except Exception as e:
+                        st.error(f"❌ Error clearing data: {str(e)}")
+
+            with col2:
+                if st.button("🚀 Extract ZIP to Data Directory", type="primary"):
+                    try:
+                        with st.spinner("Extracting ZIP file..."):
+                            # Simple: just extract directly to BASE_DIR
+                            extract_zip_safely(uploaded_file.getvalue(), str(BASE_DIR))
+                            st.info("📁 ZIP contents extracted directly to data directory")
+
+                        st.success("✅ **Data uploaded and extracted successfully!**")
+                        st.balloons()
+
+                        # Show updated directory status
+                        new_size = get_directory_size(BASE_DIR)
+                        st.metric("New Directory Size", format_size(new_size))
+
+                        # Suggest next steps
+                        st.info(
+                            "💡 **Next steps:** Navigate to other pages to verify your data is accessible."
+                        )
+
+                        # Auto-refresh the page to show new status
                         st.rerun()
-                    else:
-                        st.info("ℹ️ Directory was already empty")
-                except Exception as e:
-                    st.error(f"❌ Error clearing data: {str(e)}")
 
-        with col2:
-            if st.button("🚀 Extract ZIP to Data Directory", type="primary"):
+                    except ValueError as e:
+                        st.error(f"❌ Security error: {str(e)}")
+                    except zipfile.BadZipFile:
+                        st.error("❌ Invalid ZIP file format")
+                    except Exception as e:
+                        st.error(f"❌ Error extracting ZIP file: {str(e)}")
+
+    # Database utilities tab: create downloadable backups (works on Railway/local)
+    with tab_db:
+        st.subheader("📥 Database Downloads (Railway)")
+        st.caption("We create a consistent snapshot using SQLite backup and offer it for download.")
+
+        try:
+            from config import BASE_DIR as _BASE_DIR
+            from reactions_db import DB_PATH as REACTIONS_DB_PATH
+
+            reactions_exists = REACTIONS_DB_PATH.exists()
+            reactions_size = REACTIONS_DB_PATH.stat().st_size if reactions_exists else 0
+            st.write(f"Reactions DB: `{REACTIONS_DB_PATH}`")
+            st.write(
+                f"Exists: {'✅' if reactions_exists else '❌'} | Size: {reactions_size:,} bytes"
+            )
+        except Exception as e:
+            st.warning(f"Could not resolve reactions DB path: {e}")
+            reactions_exists = False
+
+        try:
+            from pathlib import Path as _Path
+
+            from auth_db import auth_db as _AUTH
+
+            USERS_DB_PATH = _Path(_AUTH.db_path)
+            users_exists = USERS_DB_PATH.exists()
+            users_size = USERS_DB_PATH.stat().st_size if users_exists else 0
+            st.write(f"Users DB: `{USERS_DB_PATH}`")
+            st.write(f"Exists: {'✅' if users_exists else '❌'} | Size: {users_size:,} bytes")
+        except Exception as e:
+            st.warning(f"Could not resolve users DB path: {e}")
+            users_exists = False
+
+        st.markdown("---")
+        col_db1, col_db2 = st.columns(2)
+        with col_db1:
+            if reactions_exists and st.button("Create backup of reactions.db"):
                 try:
-                    with st.spinner("Extracting ZIP file..."):
-                        # Simple: just extract directly to BASE_DIR
-                        extract_zip_safely(uploaded_file.getvalue(), str(BASE_DIR))
-                        st.info("📁 ZIP contents extracted directly to data directory")
+                    from backup_db import backup_database
 
-                    st.success("✅ **Data uploaded and extracted successfully!**")
-                    st.balloons()
-
-                    # Show updated directory status
-                    new_size = get_directory_size(BASE_DIR)
-                    st.metric("New Directory Size", format_size(new_size))
-
-                    # Suggest next steps
-                    st.info(
-                        "💡 **Next steps:** Navigate to other pages to verify your data is accessible."
+                    backup_dir = _BASE_DIR / "backups"
+                    backup_path = backup_database(REACTIONS_DB_PATH, backup_dir, compress=True)
+                    with open(backup_path, "rb") as f:
+                        data = f.read()
+                    st.success(f"Backup created: {backup_path.name} ({len(data) / 1024:.1f} KB)")
+                    st.download_button(
+                        label="⬇️ Download reactions.db backup (.gz)",
+                        data=data,
+                        file_name=backup_path.name,
+                        mime="application/gzip",
+                        key="download_reactions_db_backup",
                     )
-
-                    # Auto-refresh the page to show new status
-                    st.rerun()
-
-                except ValueError as e:
-                    st.error(f"❌ Security error: {str(e)}")
-                except zipfile.BadZipFile:
-                    st.error("❌ Invalid ZIP file format")
                 except Exception as e:
-                    st.error(f"❌ Error extracting ZIP file: {str(e)}")
+                    st.error(f"Failed to create/download reactions DB backup: {e}")
+            elif not reactions_exists:
+                st.info("reactions.db not found")
+
+        with col_db2:
+            if users_exists and st.button("Create backup of users.db"):
+                try:
+                    from backup_db import backup_database
+
+                    backup_dir = _BASE_DIR / "backups"
+                    backup_path = backup_database(USERS_DB_PATH, backup_dir, compress=True)
+                    with open(backup_path, "rb") as f:
+                        data = f.read()
+                    st.success(f"Backup created: {backup_path.name} ({len(data) / 1024:.1f} KB)")
+                    st.download_button(
+                        label="⬇️ Download users.db backup (.gz)",
+                        data=data,
+                        file_name=backup_path.name,
+                        mime="application/gzip",
+                        key="download_users_db_backup",
+                    )
+                except Exception as e:
+                    st.error(f"Failed to create/download users DB backup: {e}")
+            elif not users_exists:
+                st.info("users.db not found")
 
     # Footer with additional info
     st.divider()

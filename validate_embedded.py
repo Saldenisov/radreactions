@@ -7,7 +7,7 @@ from typing import Any
 import streamlit as st
 from PIL import Image, UnidentifiedImageError
 
-from auth_db import show_user_profile_page, auth_db
+from auth_db import auth_db, show_user_profile_page
 from config import AVAILABLE_TABLES, BASE_DIR, get_table_paths
 from pdf_utils import compile_tex_to_pdf, tsv_to_full_latex_article
 from tsv_utils import correct_tsv_file, tsv_to_visible, visible_to_tsv
@@ -267,6 +267,7 @@ def show_validation_interface(current_user):
                         else:
                             try:
                                 from reactions_db import bulk_unvalidate_table
+
                                 updated = bulk_unvalidate_table(con, tno)
                                 st.success(f"Unvalidated {updated} reaction(s) in {table_choice}.")
                                 st.rerun()
@@ -280,9 +281,7 @@ def show_validation_interface(current_user):
                 st.caption(
                     "Refresh deletes all reactions and measurements for this table, then re-imports data."
                 )
-                import_all = st.checkbox(
-                    "Import all TSV/CSV (ignore validation JSON)", value=False
-                )
+                import_all = st.checkbox("Import all TSV/CSV (ignore validation JSON)", value=False)
                 dry_run_only = st.checkbox("Dry-run preview only (no changes)", value=False)
                 confirm_refresh = st.checkbox(
                     f"I understand data for {table_choice} will be deleted and rebuilt",
@@ -299,11 +298,12 @@ def show_validation_interface(current_user):
                     else:
                         if dry_run_only:
                             try:
-                                from reactions_db import get_table_row_counts
                                 from import_reactions import (
                                     list_all_sources_for_table,
                                     list_validated_sources_for_table,
                                 )
+                                from reactions_db import get_table_row_counts
+
                                 counts = get_table_row_counts(con, tno)
                                 planned_sources = (
                                     list_all_sources_for_table(tno)
@@ -324,6 +324,7 @@ def show_validation_interface(current_user):
                             else:
                                 try:
                                     from reactions_db import delete_table_data
+
                                     stats = delete_table_data(con, tno)
                                     if import_all:
                                         from import_reactions import reimport_table_all_sources
@@ -336,7 +337,9 @@ def show_validation_interface(current_user):
                                         # Re-import only validated entries for this table
                                         from import_reactions import sync_validations_to_db
 
-                                        summary = sync_validations_to_db(table_numbers=(tno,), dry_run=False)
+                                        summary = sync_validations_to_db(
+                                            table_numbers=(tno,), dry_run=False
+                                        )
                                         st.success(
                                             f"Refreshed {table_choice}. Deleted {stats['reactions_deleted']} reactions, ~{stats['measurements_deleted_estimate']} measurements. Re-imported {summary['imported_total']} sources and set {summary['updated_total']} validations."
                                         )
@@ -413,7 +416,8 @@ def show_validation_interface(current_user):
         # Create display name with color coding
         if is_validated:
             display_name = f":green[✓ {img}]"
-            status = "✅ Validated"
+            _validator = meta.get("by")
+            status = f"✅ {_validator}" if _validator else "✅ Validated"
         elif is_skipped:
             # Streamlit doesn't have :yellow, use :orange as closest
             display_name = f":orange[⏭ {img}]"
@@ -490,7 +494,7 @@ def show_validation_interface(current_user):
 
     # Show current status and action buttons instead of a checkbox
     if db_meta_checked:
-        status_text = "✅ Validated"
+        status_text = f"✅ {meta.get('by') or 'Validated'}"
     elif db_meta_skipped:
         status_text = "⏭️ Skipped"
     else:
@@ -1004,16 +1008,6 @@ def show_validation_interface(current_user):
                         st.error(f"LaTeX compilation failed:\n{out}")
                     else:
                         st.success("LaTeX compiled successfully!")
-                        # Show compiled PDF preview
-                        if HAS_FITZ:
-                            try:
-                                doc = fitz.open(latex_path.parent / (latex_path.stem + ".pdf"))
-                                pix = doc.load_page(0).get_pixmap(matrix=fitz.Matrix(2, 2))
-                                st.image(pix.tobytes(output="png"), use_container_width=True)
-                            except Exception as e:
-                                st.warning(f"Could not display PDF preview: {e}")
-                        else:
-                            st.warning("PDF preview unavailable: PyMuPDF not installed")
 
                     # Auto-sync to DB
                     try:
@@ -1080,15 +1074,6 @@ def show_validation_interface(current_user):
                     st.error(f"Compilation failed:\n{out}")
                 else:
                     st.success("Compiled and corrections applied!")
-                    if HAS_FITZ:
-                        try:
-                            doc = fitz.open(latex_path.parent / (latex_path.stem + ".pdf"))
-                            pix = doc.load_page(0).get_pixmap(matrix=fitz.Matrix(2, 2))
-                            st.image(pix.tobytes(output="png"), use_container_width=True)
-                        except Exception as e:
-                            st.warning(f"Could not display PDF preview: {e}")
-                    else:
-                        st.warning("PDF preview unavailable: PyMuPDF not installed")
 
                 # Automatically sync TSV to DB (idempotent), regardless of validation state
                 try:
@@ -1106,294 +1091,6 @@ def show_validation_interface(current_user):
                         st.sidebar.info(f"TSV synced to DB: {mcount} measurements refreshed.")
                 except Exception as e:
                     st.sidebar.warning(f"Auto DB sync failed: {e}")
-
-            # --- Wrap selected text with \ce{...} helper ---
-            # Note: Streamlit can't read the selection from st.text_area; paste the selected text below
-            st.divider()
-            ce_col1, ce_col2, ce_col3 = st.columns([2, 1, 1])
-            with ce_col1:
-                st.text_input(
-                    "Selected text to wrap",
-                    key=f"wrap_ce_sel_{current_image}",
-                    placeholder="Paste the selected text here",
-                    help="Streamlit cannot read your selection from the editor. Paste the exact text you want to wrap.",
-                )
-            with ce_col2:
-                wrap_all = st.checkbox(
-                    "Wrap all",
-                    value=False,
-                    key=f"wrap_ce_all_{current_image}",
-                    help="If enabled, wraps all occurrences; otherwise only the first occurrence.",
-                )
-            with ce_col3:
-                if st.button(
-                    r"$\\ce{}$",
-                    key=f"wrap_ce_btn_{current_image}",
-                    help=r"Wrap selection with $\\ce{...}$",
-                ):
-                    base_text = st.session_state.get(session_key, edited_visible)
-                    target = st.session_state.get(f"wrap_ce_sel_{current_image}", "") or ""
-                    if target:
-                        replacement = f"$\\ce{{{target}}}$"
-                        new_text = (
-                            base_text.replace(target, replacement)
-                            if wrap_all
-                            else base_text.replace(target, replacement, 1)
-                        )
-                        st.session_state[session_key] = new_text
-                        st.success(r"Wrapped selection with $\\ce{...}$.")
-                        st.rerun()
-                    else:
-                        st.warning("Enter the text to wrap in the field provided.")
-
-                st.caption(
-                    "Scan all CSV files in the selected table, preview matches, and apply replacements."
-                )
-                col_a, col_b, col_c = st.columns([2, 2, 2])
-                with col_a:
-                    st.text_input(
-                        "Find",
-                        key=f"bat_fr_find_{table_choice}",
-                        placeholder="e.g. .OH",
-                    )
-                with col_b:
-                    st.text_input(
-                        "Replace with",
-                        key=f"bat_fr_repl_{table_choice}",
-                        placeholder="e.g. ^.OH",
-                    )
-                with col_c:
-                    only_eq = st.checkbox(
-                        "Only Reaction equation column",
-                        key=f"bat_fr_onlyeq_{table_choice}",
-                        value=False,
-                    )
-                col_d, col_e = st.columns([1, 1])
-                with col_d:
-                    bat_regex = st.checkbox(
-                        "Regex",
-                        key=f"bat_fr_regex_{table_choice}",
-                        value=False,
-                    )
-                with col_e:
-                    bat_case = st.checkbox(
-                        "Case sensitive",
-                        key=f"bat_fr_case_{table_choice}",
-                        value=True,
-                    )
-
-                def _compile_pat_bat(pat: str):
-                    if not pat:
-                        return None
-                    flags = 0 if bat_case else re.IGNORECASE
-                    if bat_regex:
-                        try:
-                            return re.compile(pat, flags)
-                        except re.error as e:
-                            st.warning(f"Invalid regex: {e}")
-                            return None
-                    else:
-                        return re.compile(re.escape(pat), flags)
-
-                # Storage for scan results in session
-                res_key = f"bat_fr_results_{table_choice}"
-                sel_key = f"bat_fr_selected_{table_choice}"
-
-                s1, s2 = st.columns([1, 1])
-                with s1:
-                    if st.button("Scan table", key=f"bat_fr_scan_{table_choice}"):
-                        pat = _compile_pat_bat(
-                            st.session_state.get(f"bat_fr_find_{table_choice}", "")
-                        )
-                        repl = st.session_state.get(f"bat_fr_repl_{table_choice}", "")
-                        results: list[dict[str, object]] = []
-                        if pat:
-                            for img_name in images_all:
-                                stem_i = Path(img_name).stem
-                                csv_i = TSV_DIR / f"{stem_i}.csv"
-                                if not csv_i.exists():
-                                    continue
-                                try:
-                                    text_i = csv_i.read_text(encoding="utf-8")
-                                except Exception:
-                                    continue
-                                matches = 0
-                                new_text_i = text_i
-                                try:
-                                    if only_eq:
-                                        # Replace only in 3rd column (0-based idx 2)
-                                        new_lines: list[str] = []
-                                        for ln in text_i.split("\n"):
-                                            if not ln:
-                                                new_lines.append(ln)
-                                                continue
-                                            cols = ln.split("\t")
-                                            if len(cols) >= 3:
-                                                old = cols[2]
-                                                matches += len(list(pat.finditer(old)))
-                                                cols[2] = pat.sub(lambda _m: repl, old)
-                                                ln = "\t".join(cols)
-                                            new_lines.append(ln)
-                                        new_text_i = "\n".join(new_lines)
-                                    else:
-                                        matches = len(list(pat.finditer(text_i)))
-                                        new_text_i = pat.sub(lambda _m: repl, text_i)
-                                except re.error as e:
-                                    st.warning(f"Regex error in {csv_i.name}: {e}")
-                                    continue
-                                if matches > 0 and new_text_i != text_i:
-                                    results.append(
-                                        {
-                                            "path": str(csv_i),
-                                            "file": csv_i.name,
-                                            "matches": matches,
-                                            "new": new_text_i,
-                                        }
-                                    )
-                            st.session_state[res_key] = results
-                            # Default select all
-                            st.session_state[sel_key] = {r["path"] for r in results}
-                with s2:
-                    auto_compile = st.checkbox(
-                        "Compile after apply",
-                        key=f"bat_fr_compile_{table_choice}",
-                        value=True,
-                    )
-
-                results2 = list(st.session_state.get(res_key, []))
-                if results2:
-                    st.info(f"Found {len(results2)} files with matches.")
-                    # Controls for selection
-                    all_key = f"bat_fr_select_all_{table_choice}"
-                    sel_set = set(st.session_state.get(sel_key, set()))
-                    c_all, _ = st.columns([1, 3])
-                    with c_all:
-                        if st.checkbox("Select all", key=all_key, value=True):
-                            sel_set = {r["path"] for r in results2}
-                        else:
-                            # Keep whatever previous selection was
-                            pass
-                    # Per-file checkboxes
-                    for r in results2:
-                        p = str(r["path"])  # noqa: F722
-                        fname = str(r["file"])  # noqa: F722
-                        mcount = int(r["matches"])  # noqa: F722
-                        ck = st.checkbox(
-                            f"{fname} — {mcount} matches",
-                            key=f"bat_fr_sel_{table_choice}_{fname}",
-                            value=(p in sel_set),
-                        )
-                        if ck:
-                            sel_set.add(p)
-                        else:
-                            sel_set.discard(p)
-                    st.session_state[sel_key] = sel_set
-
-                    a1, a2 = st.columns([1, 1])
-                    with a1:
-                        if st.button("Apply to selected", key=f"bat_fr_apply_sel_{table_choice}"):
-                            applied = 0
-                            for r in results2:
-                                p = str(r["path"])  # noqa: F722
-                                if p not in sel_set:
-                                    continue
-                                new_text = str(r["new"])  # noqa: F722
-                                csv_p = Path(p)
-                                try:
-                                    csv_p.write_text(new_text, encoding="utf-8")
-                                    # Correct TSV
-                                    correct_tsv_file(csv_p)
-                                    if auto_compile:
-                                        lp = tsv_to_full_latex_article(csv_p)
-                                        compile_tex_to_pdf(lp)
-                                    applied += 1
-                                except Exception as e:
-                                    st.warning(f"Failed to update {csv_p.name}: {e}")
-                            st.success(f"Applied to {applied} files.")
-                            st.rerun()
-                    with a2:
-                        if st.button("Apply to all", key=f"bat_fr_apply_all_{table_choice}"):
-                            applied = 0
-                            for r in results2:
-                                p = str(r["path"])  # noqa: F722
-                                new_text = str(r["new"])  # noqa: F722
-                                csv_p = Path(p)
-                                try:
-                                    csv_p.write_text(new_text, encoding="utf-8")
-                                    correct_tsv_file(csv_p)
-                                    if auto_compile:
-                                        lp = tsv_to_full_latex_article(csv_p)
-                                        compile_tex_to_pdf(lp)
-                                    applied += 1
-                                except Exception as e:
-                                    st.warning(f"Failed to update {csv_p.name}: {e}")
-                            st.success(f"Applied to {applied} files.")
-                            st.rerun()
-
-                st.markdown("---")
-                st.markdown("**Quick Fix across table: Reaction equation .OH → ^.OH**")
-                qfb1, qfb2 = st.columns([1, 1])
-                with qfb1:
-                    if st.button("Scan quick fix", key=f"bat_qf_scan_{table_choice}"):
-                        # Pre-configure results using quick fix in eq only
-                        results_qf: list[dict[str, object]] = []
-                        for img_name in images_all:
-                            stem_i = Path(img_name).stem
-                            csv_i = TSV_DIR / f"{stem_i}.csv"
-                            if not csv_i.exists():
-                                continue
-                            try:
-                                text_i = csv_i.read_text(encoding="utf-8")
-                            except Exception:
-                                continue
-                            matches = 0
-                            new_lines2: list[str] = []
-                            for ln in text_i.split("\n"):
-                                if not ln:
-                                    new_lines2.append(ln)
-                                    continue
-                                cols = ln.split("\t")
-                                if len(cols) >= 3:
-                                    old = cols[2]
-                                    cnt = old.count(".OH")
-                                    if cnt:
-                                        matches += cnt
-                                        cols[2] = old.replace(".OH", "^.OH")
-                                        ln = "\t".join(cols)
-                                new_lines2.append(ln)
-                            if matches > 0:
-                                results_qf.append(
-                                    {
-                                        "path": str(csv_i),
-                                        "file": csv_i.name,
-                                        "matches": matches,
-                                        "new": "\n".join(new_lines2),
-                                    }
-                                )
-                        st.session_state[res_key] = results_qf
-                        st.session_state[sel_key] = {r["path"] for r in results_qf}
-                with qfb2:
-                    if st.button("Apply quick fix to all", key=f"bat_qf_apply_all_{table_choice}"):
-                        res_qf2 = list(st.session_state.get(res_key, []))
-                        if not res_qf2:
-                            st.info("No scanned results. Click 'Scan quick fix' first.")
-                        else:
-                            applied = 0
-                            for r in res_qf2:
-                                p = str(r["path"])  # noqa: F722
-                                new_text = str(r["new"])  # noqa: F722
-                                csv_p = Path(p)
-                                try:
-                                    csv_p.write_text(new_text, encoding="utf-8")
-                                    correct_tsv_file(csv_p)
-                                    if auto_compile:
-                                        lp = tsv_to_full_latex_article(csv_p)
-                                        compile_tex_to_pdf(lp)
-                                    applied += 1
-                                except Exception as e:
-                                    st.warning(f"Failed to update {csv_p.name}: {e}")
-                            st.success(f"Quick fix applied to {applied} files.")
-                            st.rerun()
 
     # === LaTeX TAB ===
     with tab3:

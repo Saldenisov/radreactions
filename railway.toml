@@ -1,5 +1,10 @@
 [build]
 builder = "dockerfile"
+# Enable Docker layer caching for faster builds
+dockerfilePath = "Dockerfile"
+watchPatterns = ["**/*.py", "requirements.txt", "Dockerfile"]
+# Enable build caching
+cache = true
 
 [deploy]
 healthcheckPath = "/"

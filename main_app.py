@@ -9,6 +9,21 @@ import streamlit as st
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+# Initialize graceful shutdown handler
+try:
+    print("[MAIN] Graceful shutdown handler initialized")
+except Exception as e:
+    print(f"[MAIN] Warning: Could not initialize shutdown handler: {e}")
+
+# Initialize automated backup scheduler
+try:
+    from backup_scheduler import start_scheduler
+
+    start_scheduler()
+    print("[MAIN] Automated backup scheduler started")
+except Exception as e:
+    print(f"[MAIN] Warning: Could not start backup scheduler: {e}")
 from auth_db import (
     auth_db,
     check_authentication,
