@@ -110,8 +110,8 @@ def escape_latex(s):
 
 
 def _split_preserve_math_and_ce(s: str):
-    """Yield (segment, is_raw) where raw segments are math ($...$, \(...\), \[...\]) or \ce{...}.
-    Balanced-brace scan for \ce, simple scans for math blocks.
+    """Yield (segment, is_raw) where raw segments are math ($...$, \(...\), \[...\]), \ce{...}, or common LaTeX commands.
+    Balanced-brace scan for \ce and LaTeX commands, simple scans for math blocks.
     """
     out = []
     i = 0
@@ -172,9 +172,52 @@ def _split_preserve_math_and_ce(s: str):
             i = j
             continue
 
+        # Common LaTeX text formatting commands: \textit{}, \textbf{}, \text{}, etc.
+        latex_commands = [
+            r"\textit{",
+            r"\textbf{",
+            r"\text{",
+            r"\emph{",
+            r"\mathrm{",
+            r"\mathit{",
+            r"\mathbf{",
+        ]
+        latex_command_found = False
+        for cmd in latex_commands:
+            if s.startswith(cmd, i):
+                j = i + len(cmd)  # position right after the command and opening brace
+                depth = 1  # we've seen the opening '{'
+                while j < n and depth > 0:
+                    c = s[j]
+                    if c == "{":
+                        depth += 1
+                    elif c == "}":
+                        depth -= 1
+                    elif c == "\\" and j + 1 < n:
+                        j += 2
+                        continue
+                    j += 1
+                append_segment(i, j, True)
+                i = j
+                latex_command_found = True
+                break
+
+        # If we processed a LaTeX command, continue to next iteration
+        if latex_command_found:
+            continue
+
         # Plain text up to next special opener
         next_positions = []
-        for opener in ["$", r"\(", r"\[", r"\\ce{"]:
+        openers = ["$", r"\(", r"\[", r"\\ce{"] + [
+            r"\textit{",
+            r"\textbf{",
+            r"\text{",
+            r"\emph{",
+            r"\mathrm{",
+            r"\mathit{",
+            r"\mathbf{",
+        ]
+        for opener in openers:
             pos = s.find(opener, i)
             if pos != -1:
                 next_positions.append(pos)
