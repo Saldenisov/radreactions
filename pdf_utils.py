@@ -204,8 +204,7 @@ def _normalize_inline_chem_to_ce(s: str) -> str:
         # mhchem-safe charge notation: O^{\cdot-} -> O^{.-}, CO2^{-} -> CO2^-
         t = re.sub(r"\^\{\\cdot\s*([+-])\}", r"^{.\1}", t)
         t = re.sub(r"\^\{([+-])\}", r"^\1", t)
-        # remove spaces around +, - and inside superscripts
-        t = re.sub(r"\s*\+\s*", "+", t)
+        # remove spaces around - and inside superscripts (preserve '+' spacing as-is)
         t = re.sub(r"\s*-\s*", "-", t)
         t = re.sub(r"\^\s*\{\s*", "^{", t)
         t = re.sub(r"\s*\}\s*", "}", t)
