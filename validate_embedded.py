@@ -683,6 +683,30 @@ def show_validation_interface(current_user):
                     st.sidebar.write(f"[DEBUG] Cache update failed: {e}")
                 pass
 
+            # Clear any cached filter states to force refresh
+            if f"filter_cache_{table_choice}" in st.session_state:
+                del st.session_state[f"filter_cache_{table_choice}"]
+
+            # If a skipped reaction was validated, also remove skip status
+            if desired_state and db_meta_skipped:
+                try:
+                    # Remove skip status when validating a skipped reaction
+                    set_skipped_by_image(
+                        con,
+                        str(png_path),
+                        False,  # Remove skip status
+                        by=None,
+                        at_iso=None,
+                    )
+                    # Update the cache to reflect the change
+                    new_meta["skipped"] = False
+                    current_table_cache[current_image] = new_meta
+                except Exception as e:
+                    if debug_mode:
+                        st.sidebar.write(
+                            f"[DEBUG] Failed to remove skip status when validating: {e}"
+                        )
+
             # If validated and in "Only unvalidated", select next
             if desired_state and filter_mode == "Only unvalidated":
                 remaining_unvalidated = [
@@ -695,6 +719,9 @@ def show_validation_interface(current_user):
                     st.session_state.selected_image = remaining_unvalidated[0]
                     if remaining_unvalidated[0] not in images[start_idx:end_idx]:
                         st.session_state.page_num = 0
+                else:
+                    # No more unvalidated reactions, show message
+                    st.success("All reactions in this table have been validated!")
 
             st.rerun()
         except Exception as e:
@@ -787,6 +814,10 @@ def show_validation_interface(current_user):
                 }
             current_table_cache[current_image] = new_meta
 
+            # Clear any cached filter states to force refresh
+            if f"filter_cache_{table_choice}" in st.session_state:
+                del st.session_state[f"filter_cache_{table_choice}"]
+
             # Adjust selection for filters
             if do_skip and filter_mode == "Only unvalidated":
                 remaining_unvalidated = [
@@ -809,6 +840,11 @@ def show_validation_interface(current_user):
                     st.session_state.selected_image = remaining_skipped[0]
                     if remaining_skipped[0] not in images[start_idx:end_idx]:
                         st.session_state.page_num = 0
+                else:
+                    # No more skipped reactions, switch to "All" filter or show message
+                    st.info("No more skipped reactions in this table.")
+                    # Force a rerun to refresh the filter list
+                    st.rerun()
 
             st.rerun()
         except Exception as e:
@@ -925,6 +961,56 @@ def show_validation_interface(current_user):
         st.markdown("---")
         st.header("Parsed PDF (rendered)")
 
+        # Add Recompile button in Image tab
+        col_recompile, col_spacer = st.columns([1, 3])
+        with col_recompile:
+            if st.button("🔄 Recompile PDF", key=f"recompile_image_{current_image}"):
+                # Use same logic as TSV tab recompilation
+                stem = Path(current_image).stem
+                csv_file = TSV_DIR / f"{stem}.csv"
+
+                try:
+                    if csv_file.exists():
+                        # Apply TSV corrections
+                        corrected_tsv_text = correct_tsv_file(csv_file)
+
+                        # Generate LaTeX and compile
+                        latex_path = tsv_to_full_latex_article(csv_file)
+                        returncode, out = compile_tex_to_pdf(latex_path)
+
+                        if returncode != 0:
+                            st.error(f"Compilation failed:\n{out}")
+                        else:
+                            st.success("PDF recompiled successfully!")
+                            # Mark PDF as updated for cross-tab refresh
+                            st.session_state[f"pdf_updated_{current_image}"] = (
+                                datetime.now().isoformat()
+                            )
+                            # Force refresh of the page to show updated PDF
+                            st.rerun()
+                    else:
+                        st.warning(f"No TSV/CSV file found for {current_image}. Cannot recompile.")
+                except Exception as e:
+                    st.error(f"Recompilation failed: {e}")
+
+        # Check for PDF update timestamp and display update notification
+        pdf_update_key = f"pdf_updated_{current_image}"
+        last_pdf_view_key = f"pdf_last_viewed_{current_image}"
+
+        # Initialize last viewed timestamp if not exists
+        if last_pdf_view_key not in st.session_state:
+            st.session_state[last_pdf_view_key] = datetime.now().isoformat()
+
+        # Check if PDF was updated since last view
+        if pdf_update_key in st.session_state:
+            pdf_update_time = st.session_state[pdf_update_key]
+            last_view_time = st.session_state[last_pdf_view_key]
+
+            if pdf_update_time > last_view_time:
+                st.info("📄 PDF has been updated! Showing latest version.")
+                # Update last viewed time
+                st.session_state[last_pdf_view_key] = datetime.now().isoformat()
+
         # Check multiple possible locations for the compiled PDF
         stem = Path(current_image).stem
         possible_pdf_paths = [
@@ -1008,6 +1094,26 @@ def show_validation_interface(current_user):
                         st.error(f"LaTeX compilation failed:\n{out}")
                     else:
                         st.success("LaTeX compiled successfully!")
+                        # Mark PDF as updated for cross-tab refresh
+                        st.session_state[f"pdf_updated_{current_image}"] = (
+                            datetime.now().isoformat()
+                        )
+
+                        # Display the updated PDF immediately below the editor
+                        pdf_path = latex_path.parent / (latex_path.stem + ".pdf")
+                        if pdf_path.exists() and HAS_FITZ:
+                            st.markdown("### Updated PDF Preview")
+                            try:
+                                doc = fitz.open(pdf_path)
+                                pix = doc.load_page(0).get_pixmap(matrix=fitz.Matrix(2, 2))
+                                st.image(pix.tobytes(output="png"), use_container_width=True)
+                                st.caption(f"Compiled PDF: {pdf_path.name}")
+                            except Exception as e:
+                                st.warning(f"Could not display updated PDF: {e}")
+                        elif pdf_path.exists():
+                            st.info(
+                                "PDF compiled successfully but preview unavailable (PyMuPDF not installed)"
+                            )
 
                     # Auto-sync to DB
                     try:
@@ -1074,6 +1180,24 @@ def show_validation_interface(current_user):
                     st.error(f"Compilation failed:\n{out}")
                 else:
                     st.success("Compiled and corrections applied!")
+                    # Mark PDF as updated for cross-tab refresh
+                    st.session_state[f"pdf_updated_{current_image}"] = datetime.now().isoformat()
+
+                    # Display the updated PDF immediately below the editor
+                    pdf_path = latex_path.parent / (latex_path.stem + ".pdf")
+                    if pdf_path.exists() and HAS_FITZ:
+                        st.markdown("### Updated PDF Preview")
+                        try:
+                            doc = fitz.open(pdf_path)
+                            pix = doc.load_page(0).get_pixmap(matrix=fitz.Matrix(2, 2))
+                            st.image(pix.tobytes(output="png"), use_container_width=True)
+                            st.caption(f"Compiled PDF: {pdf_path.name}")
+                        except Exception as e:
+                            st.warning(f"Could not display updated PDF: {e}")
+                    elif pdf_path.exists():
+                        st.info(
+                            "PDF compiled successfully but preview unavailable (PyMuPDF not installed)"
+                        )
 
                 # Automatically sync TSV to DB (idempotent), regardless of validation state
                 try:
@@ -1154,6 +1278,10 @@ def show_validation_interface(current_user):
                         st.error(f"Compilation failed:\n{out}")
                     else:
                         st.success("Compiled LaTeX successfully!")
+                        # Mark PDF as updated for cross-tab refresh
+                        st.session_state[f"pdf_updated_{current_image}"] = (
+                            datetime.now().isoformat()
+                        )
                         pdf_file = latex_path.parent / (latex_path.stem + ".pdf")
                         if pdf_file.exists():
                             if HAS_FITZ:
