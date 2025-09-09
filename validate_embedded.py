@@ -367,34 +367,64 @@ def show_validation_interface(current_user):
         st.stop()
 
     # === Navigation logic with table pagination ===
-    PAGE_SIZE = 15
+    st.sidebar.markdown("### 📋 Image Selection Table")
+
+    # Page size control
+    col_size, col_goto = st.sidebar.columns([1, 1])
+    with col_size:
+        page_size_key = f"page_size_{table_choice}"
+        if page_size_key not in st.session_state:
+            st.session_state[page_size_key] = 15
+
+        PAGE_SIZE = st.selectbox(
+            "Items per page:",
+            options=[5, 10, 15, 20, 25, 30, 50],
+            index=[5, 10, 15, 20, 25, 30, 50].index(st.session_state[page_size_key])
+            if st.session_state[page_size_key] in [5, 10, 15, 20, 25, 30, 50]
+            else 2,
+            key=page_size_key,
+        )
+
     total_images = len(images)
     total_pages = max(1, (total_images + PAGE_SIZE - 1) // PAGE_SIZE)
 
     # Initialize page number and selected image
-    if "page_num" not in st.session_state or st.session_state.get("table_choice") != table_choice:
-        st.session_state.page_num = 0
+    page_key = f"page_num_{table_choice}"
+    if page_key not in st.session_state or st.session_state.get("table_choice") != table_choice:
+        st.session_state[page_key] = 1  # 1-based for user display
         st.session_state.table_choice = table_choice
 
     if "selected_image" not in st.session_state:
         st.session_state.selected_image = images[0] if images else None
 
-    # Ensure page number is valid
-    if st.session_state.page_num >= total_pages:
-        st.session_state.page_num = max(0, total_pages - 1)
+    # Direct page navigation
+    with col_goto:
+        target_page = st.number_input(
+            "Go to page:",
+            min_value=1,
+            max_value=total_pages,
+            value=st.session_state[page_key],
+            step=1,
+            key=f"goto_page_{table_choice}",
+        )
+        if target_page != st.session_state[page_key]:
+            st.session_state[page_key] = target_page
+            st.rerun()
 
-    current_page = st.session_state.page_num
+    # Ensure page number is valid (convert to 0-based for internal use)
+    current_page = max(0, min(st.session_state[page_key] - 1, total_pages - 1))
+    st.session_state[page_key] = current_page + 1  # Keep session state 1-based
+
     start_idx = current_page * PAGE_SIZE
     end_idx = min(start_idx + PAGE_SIZE, total_images)
     page_images = images[start_idx:end_idx]
 
     # Page navigation controls
-    st.sidebar.markdown("### 📋 Image Selection Table")
     page_col1, page_col2, page_col3 = st.sidebar.columns([1, 2, 1])
 
     with page_col1:
-        if st.button("◀ Prev Page", disabled=(current_page == 0)):
-            st.session_state.page_num = max(0, current_page - 1)
+        if st.button("◀ Prev", disabled=(current_page == 0)):
+            st.session_state[page_key] = max(1, st.session_state[page_key] - 1)
             st.rerun()
 
     with page_col2:
@@ -402,8 +432,8 @@ def show_validation_interface(current_user):
         st.write(f"({start_idx + 1}-{end_idx} of {total_images})")
 
     with page_col3:
-        if st.button("Next Page ▶", disabled=(current_page >= total_pages - 1)):
-            st.session_state.page_num = min(total_pages - 1, current_page + 1)
+        if st.button("Next ▶", disabled=(current_page >= total_pages - 1)):
+            st.session_state[page_key] = min(total_pages, st.session_state[page_key] + 1)
             st.rerun()
 
     # Create table data for current page
@@ -449,7 +479,7 @@ def show_validation_interface(current_user):
         }
 
         current_selected = st.session_state.get("selected_image")
-        radio_key = f"image_selector_{table_choice}_{filter_mode}_{current_page}"
+        radio_key = f"image_selector_{table_choice}_{filter_mode}_{current_page}_{PAGE_SIZE}"
 
         # Ensure the radio's state is aligned with current selection before rendering
         if radio_key not in st.session_state or st.session_state.get(radio_key) not in page_images:
