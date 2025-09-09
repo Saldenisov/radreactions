@@ -430,12 +430,17 @@ with browse_tab:
 
                         # Render compiled PDF (as PNG) if available, above validation info
                         try:
-                            tno = (
-                                int(rec.get("table_no"))
-                                if rec.get("table_no") is not None
-                                else None
-                            )
-                            png_path = rec.get("png_path") or ""
+                            # sqlite3.Row does not support .get(); use key access with guards
+                            try:
+                                _tno_val = rec["table_no"]
+                            except Exception:
+                                _tno_val = None
+                            try:
+                                _png_val = rec["png_path"]
+                            except Exception:
+                                _png_val = None
+                            tno = int(_tno_val) if _tno_val is not None else None
+                            png_path = str(_png_val) if _png_val else ""
                             stem = Path(png_path).stem if png_path else None
                             if tno and stem:
                                 IMAGE_DIR, PDF_DIR, TSV_DIR, _ = get_table_paths(f"table{tno}")
@@ -492,12 +497,16 @@ with browse_tab:
 
                         # Determine paths for potential TSV editing or reporting
                         try:
-                            tno = (
-                                int(rec.get("table_no"))
-                                if rec.get("table_no") is not None
-                                else None
-                            )
-                            png_path = rec.get("png_path") or ""
+                            try:
+                                _tno_val = rec["table_no"]
+                            except Exception:
+                                _tno_val = None
+                            try:
+                                _png_val = rec["png_path"]
+                            except Exception:
+                                _png_val = None
+                            tno = int(_tno_val) if _tno_val is not None else None
+                            png_path = str(_png_val) if _png_val else ""
                             stem = Path(png_path).stem if png_path else None
                             src_csv = None
                             if tno and stem:
@@ -604,10 +613,19 @@ with browse_tab:
                                             report_dir = _BASE / "reports"
                                             report_dir.mkdir(parents=True, exist_ok=True)
                                             ts = datetime.now().isoformat().replace(":", "-")
+                                            # Safe extraction from sqlite3.Row
+                                            try:
+                                                _png = rec["png_path"]
+                                            except Exception:
+                                                _png = None
+                                            try:
+                                                _src = rec["source_path"]
+                                            except Exception:
+                                                _src = None
                                             payload = {
                                                 "reaction_id": int(rid),
-                                                "png_path": rec.get("png_path"),
-                                                "source_path": rec.get("source_path"),
+                                                "png_path": _png,
+                                                "source_path": _src,
                                                 "user": current_user or "guest",
                                                 "email": email or None,
                                                 "comment": comment.strip(),
