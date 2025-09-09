@@ -288,8 +288,12 @@ def latex_to_canonical(
         core = payload
     # normalize arrows
     core = re.sub(r"\\rightarrow|\\to|\-\\>", "->", core)
+    # Collapse duplicate carets that may appear from OCR/cleanup (e.g., '^^{.OH}' -> '^{.OH}')
+    core = re.sub(r"\^\s*\^+", "^", core)
     # Fix common malformed braces for radical dot: turn '^{.' (missing closing) into '^{.}'
     core = re.sub(r"\^\{\.(?!\})", "^{.}", core)
+    # If the radical dot swallows the species inside braces (e.g., '^{.OH}'), split to '^{.}OH'
+    core = re.sub(r"\^\{\.\s*([A-Za-z][A-Za-z0-9]*)\}", r"^{.}\1", core)
     # Within an already braced superscript, drop inner '^.' to avoid nested braces like '^{2-^{.}}' -> '^{2-.}'
     core = re.sub(r"(\^\{[^}]*?)\^\.?", r"\1.", core)
     # Collapse a nested braced dot inside a braced superscript: '^{2-^{.}}' -> '^{2-.}' (explicit form)
@@ -416,6 +420,53 @@ def get_or_create_reaction(
             ),
         )
         return rid
+
+    # Fallback: if no matching PNG row, try matching by source_path (exact, then by filename)
+    if src_canon:
+        row = con.execute(
+            "SELECT id FROM reactions WHERE source_path = ? ORDER BY validated DESC LIMIT 1",
+            (src_canon,),
+        ).fetchone()
+        if not row:
+            filename = Path(source_path).name if source_path else None
+            if filename:
+                row = con.execute(
+                    "SELECT id FROM reactions WHERE source_path LIKE '%' || ? ORDER BY validated DESC LIMIT 1",
+                    (filename,),
+                ).fetchone()
+        if row:
+            rid = row[0]
+            con.execute(
+                """
+                UPDATE reactions
+                SET reaction_name = COALESCE(?, reaction_name),
+                    formula_latex = COALESCE(?, formula_latex),
+                    formula_canonical = COALESCE(?, formula_canonical),
+                    reactants = COALESCE(?, reactants),
+                    products = COALESCE(?, products),
+                    reactant_species = COALESCE(?, reactant_species),
+                    product_species = COALESCE(?, product_species),
+                    notes = COALESCE(?, notes),
+                    source_path = COALESCE(?, source_path),
+                    png_path = COALESCE(?, png_path),
+                    updated_at = datetime('now')
+                WHERE id = ?
+                """,
+                (
+                    reaction_name,
+                    formula_latex,
+                    canonical,
+                    reactants,
+                    products,
+                    json.dumps(r_species, ensure_ascii=False) if r_species else None,
+                    json.dumps(p_species, ensure_ascii=False) if p_species else None,
+                    notes,
+                    src_canon,
+                    png_canon,
+                    rid,
+                ),
+            )
+            return rid
 
     cur = con.execute(
         """
@@ -608,6 +659,7 @@ def get_database_stats(con: sqlite3.Connection) -> dict[str, Any]:
 
 # ---------------- Admin helper operations -----------------
 
+
 def bulk_unvalidate_table(con: sqlite3.Connection, table_no: int) -> int:
     """Set validated=0 and clear metadata for all reactions in a given table.
 
@@ -651,7 +703,9 @@ def get_table_row_counts(con: sqlite3.Connection, table_no: int) -> dict[str, in
     """
     try:
         reactions = int(
-            con.execute("SELECT COUNT(*) FROM reactions WHERE table_no = ?", (table_no,)).fetchone()[0]
+            con.execute(
+                "SELECT COUNT(*) FROM reactions WHERE table_no = ?", (table_no,)
+            ).fetchone()[0]
         )
     except Exception:
         reactions = 0

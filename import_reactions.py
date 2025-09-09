@@ -152,10 +152,10 @@ def import_single_csv_idempotent(csv_path: Path, table_no: int):
         )
         inserted_reactions += 1
 
-        # Remove prior measurements from this source for this reaction
+        # Remove all prior measurements for this reaction to avoid duplicates across source_path variants
         con.execute(
-            "DELETE FROM measurements WHERE reaction_id = ? AND source_path = ?",
-            (rid, str(csv_path)),
+            "DELETE FROM measurements WHERE reaction_id = ?",
+            (rid,),
         )
 
         for row in rows:
@@ -240,10 +240,10 @@ def import_from_csvs(base_dir: Path | None = None, table_numbers=(5, 6, 7, 8, 9)
                     png_path=png_path_str,
                 )
                 inserted_reactions += 1  # upper bound; duplicates are updated not inserted
-                # Remove prior measurements from this source for idempotency
+                # Remove all prior measurements for this reaction to ensure idempotency
                 con.execute(
-                    "DELETE FROM measurements WHERE reaction_id = ? AND source_path = ?",
-                    (rid, str(csv_path)),
+                    "DELETE FROM measurements WHERE reaction_id = ?",
+                    (rid,),
                 )
                 for row in rows:
                     row = row + [""] * (7 - len(row))
@@ -308,8 +308,8 @@ def import_from_csvs(base_dir: Path | None = None, table_numbers=(5, 6, 7, 8, 9)
                 )
                 inserted_reactions += 1
                 con.execute(
-                    "DELETE FROM measurements WHERE reaction_id = ? AND source_path = ?",
-                    (rid, str(tsv_path)),
+                    "DELETE FROM measurements WHERE reaction_id = ?",
+                    (rid,),
                 )
                 for row in rows:
                     row = row + [""] * (7 - len(row))
@@ -390,7 +390,11 @@ def list_validated_sources_for_table(table_no: int) -> list[Path]:
         stem = Path(img).stem
         csv_candidate = TSV_DIR / f"{stem}.csv"
         tsv_candidate = TSV_DIR / f"{stem}.tsv"
-        source_path = csv_candidate if csv_candidate.exists() else (tsv_candidate if tsv_candidate.exists() else None)
+        source_path = (
+            csv_candidate
+            if csv_candidate.exists()
+            else (tsv_candidate if tsv_candidate.exists() else None)
+        )
         if source_path is not None:
             sources.append(source_path)
     return sources
@@ -414,7 +418,11 @@ def reimport_table_all_sources(table_no: int) -> dict[str, int]:
             print(f"[REIMPORT_ALL] Failed {src}: {e}")
             continue
     con.commit()
-    return {"sources": len(sources), "reactions_imported": reactions_total, "measurements_imported": measurements_total}
+    return {
+        "sources": len(sources),
+        "reactions_imported": reactions_total,
+        "measurements_imported": measurements_total,
+    }
 
 
 def sync_validations_to_db(table_numbers=(5, 6, 7, 8, 9), dry_run: bool = False) -> dict[str, Any]:

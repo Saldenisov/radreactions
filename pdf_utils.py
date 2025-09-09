@@ -356,17 +356,11 @@ def tsv_to_full_latex_article(tsv_path, out_dir=None):
             rows.append(row)
 
     latex = [
-        "\\documentclass[a4paper,12pt]{article}",
+        "\\documentclass[border=0pt]{standalone}",
         "\\usepackage{booktabs}",
         "\\usepackage[version=4]{mhchem}",
-        "\\usepackage{pdflscape}",
-        "\\usepackage{geometry}",
-        "\\geometry{margin=1cm}",
         "",
         "\\begin{document}",
-        "\\begin{landscape}",
-        "\\begin{table}[htbp]",
-        "\\centering",
         "\\footnotesize",
         "\\renewcommand{\\arraystretch}{1.2}",
         "\\begin{tabular}{lp{5cm}p{6cm}llp{8cm}l}",
@@ -428,10 +422,6 @@ def tsv_to_full_latex_article(tsv_path, out_dir=None):
         [
             "\\bottomrule",
             "\\end{tabular}",
-            "%\\caption{Kinetic data table}",
-            "%\\label{tab:kinetics}",
-            "\\end{table}",
-            "\\end{landscape}",
             "\\end{document}",
         ]
     )
