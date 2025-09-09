@@ -1,3 +1,4 @@
+import json
 import math
 import sys
 from pathlib import Path
@@ -40,6 +41,15 @@ from reactions_db import (
 )
 from validate_embedded import show_validation_interface
 
+# Optional PDF rendering support
+try:
+    import fitz  # PyMuPDF
+
+    HAS_FITZ_MAIN = True
+except Exception:
+    fitz = None
+    HAS_FITZ_MAIN = False
+
 st.set_page_config(page_title="Radical Reactions Platform (Buxton)", layout="wide")
 
 
@@ -68,7 +78,7 @@ print(f"[MAIN PAGE] Session state page_mode: {st.session_state.get('page_mode', 
 # Volume persistence diagnostics
 import os
 
-from config import BASE_DIR
+from config import BASE_DIR, get_table_paths
 from reactions_db import DB_PATH
 
 print(f"[VOLUME DEBUG] BASE_DIR resolved to: {BASE_DIR}")
@@ -417,6 +427,47 @@ with browse_tab:
                         st.code(f"Reactants: {rec['reactants']}\nProducts: {rec['products']}")
                         if rec["notes"]:
                             st.markdown(f"**Notes:** {rec['notes']}")
+
+                        # Render compiled PDF (as PNG) if available, above validation info
+                        try:
+                            tno = (
+                                int(rec.get("table_no"))
+                                if rec.get("table_no") is not None
+                                else None
+                            )
+                            png_path = rec.get("png_path") or ""
+                            stem = Path(png_path).stem if png_path else None
+                            if tno and stem:
+                                IMAGE_DIR, PDF_DIR, TSV_DIR, _ = get_table_paths(f"table{tno}")
+                                possible_pdf_paths = [
+                                    PDF_DIR / f"{stem}.pdf",
+                                    TSV_DIR / "latex" / f"{stem}.pdf",
+                                ]
+                                for _pdf in possible_pdf_paths:
+                                    if _pdf.exists():
+                                        if HAS_FITZ_MAIN:
+                                            try:
+                                                doc = fitz.open(_pdf)
+                                                pix = doc.load_page(0).get_pixmap(
+                                                    matrix=fitz.Matrix(2.5, 2.5)
+                                                )
+                                                st.image(
+                                                    pix.tobytes(output="png"),
+                                                    use_container_width=True,
+                                                    caption=f"PDF: {_pdf.name}",
+                                                )
+                                            except Exception as _e:
+                                                st.warning(
+                                                    f"Could not render PDF {_pdf.name}: {_e}"
+                                                )
+                                        else:
+                                            st.info(
+                                                "PDF preview unavailable: PyMuPDF not installed on server"
+                                            )
+                                        break
+                        except Exception as _e:
+                            st.caption(f"PDF preview error: {_e}")
+
                         # Validator metadata from DB
                         try:
                             src = rec["source_path"] or ""
@@ -430,6 +481,148 @@ with browse_tab:
                                     st.markdown(f"**Validated at:** {when}")
                         except Exception:
                             pass
+
+                        # Admin/non-admin actions
+                        try:
+                            from auth_db import auth_db as _adb
+
+                            is_admin = bool(_adb.is_admin(current_user)) if current_user else False
+                        except Exception:
+                            is_admin = False
+
+                        # Determine paths for potential TSV editing or reporting
+                        try:
+                            tno = (
+                                int(rec.get("table_no"))
+                                if rec.get("table_no") is not None
+                                else None
+                            )
+                            png_path = rec.get("png_path") or ""
+                            stem = Path(png_path).stem if png_path else None
+                            src_csv = None
+                            if tno and stem:
+                                _, _PDF_DIR, TSV_DIR, _ = get_table_paths(f"table{tno}")
+                                csv_path = TSV_DIR / f"{stem}.csv"
+                                tsv_path = TSV_DIR / f"{stem}.tsv"
+                                src_csv = (
+                                    csv_path
+                                    if csv_path.exists()
+                                    else (tsv_path if tsv_path.exists() else None)
+                                )
+                        except Exception:
+                            src_csv = None
+
+                        if is_admin:
+                            from pdf_utils import compile_tex_to_pdf, tsv_to_full_latex_article
+                            from tsv_utils import correct_tsv_file
+
+                            with st.expander("🛠️ Admin: Edit TSV and Recompile", expanded=False):
+                                if not src_csv:
+                                    st.info("No CSV/TSV found for this reaction.")
+                                else:
+                                    # Load current TSV content
+                                    try:
+                                        cur_text = Path(src_csv).read_text(encoding="utf-8")
+                                    except Exception:
+                                        cur_text = ""
+                                    t_key = f"admin_edit_tsv_{rid}"
+                                    edited = st.text_area(
+                                        f"Edit TSV for {Path(src_csv).name}",
+                                        value=cur_text,
+                                        height=220,
+                                        key=t_key,
+                                    )
+                                    cols = st.columns([1, 1])
+                                    with cols[0]:
+                                        if st.button("💾 Save TSV", key=f"save_tsv_{rid}"):
+                                            try:
+                                                Path(src_csv).write_text(edited, encoding="utf-8")
+                                                st.success("TSV saved.")
+                                            except Exception as e:
+                                                st.error(f"Save failed: {e}")
+                                    with cols[1]:
+                                        if st.button(
+                                            "🔄 Save + Correct + Recompile",
+                                            key=f"recompile_tsv_{rid}",
+                                        ):
+                                            try:
+                                                Path(src_csv).write_text(edited, encoding="utf-8")
+                                                _ = correct_tsv_file(Path(src_csv))
+                                                lp = tsv_to_full_latex_article(Path(src_csv))
+                                                rc, out = compile_tex_to_pdf(lp)
+                                                if rc != 0:
+                                                    st.error(f"Compilation failed:\n{out}")
+                                                else:
+                                                    st.success("Recompiled successfully.")
+                                                    # Try to render freshly compiled PDF
+                                                    try:
+                                                        if HAS_FITZ_MAIN:
+                                                            pdf_file = lp.parent / (
+                                                                lp.stem + ".pdf"
+                                                            )
+                                                            if pdf_file.exists():
+                                                                doc = fitz.open(pdf_file)
+                                                                pix = doc.load_page(0).get_pixmap(
+                                                                    matrix=fitz.Matrix(2, 2)
+                                                                )
+                                                                st.image(
+                                                                    pix.tobytes(output="png"),
+                                                                    use_container_width=True,
+                                                                )
+                                                    except Exception as e:
+                                                        st.warning(f"Preview failed: {e}")
+                                            except Exception as e:
+                                                st.error(f"Recompile failed: {e}")
+                        else:
+                            # Non-admin/guest: problem report with lightweight CAPTCHA
+                            with st.expander("📝 Report a problem", expanded=False):
+                                import random
+                                from datetime import datetime
+
+                                from config import BASE_DIR as _BASE
+
+                                email = st.text_input(
+                                    "Your email (optional)", key=f"rep_email_{rid}"
+                                )
+                                comment = st.text_area(
+                                    "Describe the problem", height=120, key=f"rep_comment_{rid}"
+                                )
+                                # Simple math captcha
+                                a = random.randint(1, 9)
+                                b = random.randint(1, 9)
+                                st.caption("Human check: What is the sum?")
+                                ans = st.text_input(f"{a} + {b} = ?", key=f"rep_captcha_{rid}")
+                                if st.button("Submit report", key=f"rep_submit_{rid}"):
+                                    try:
+                                        if str(ans).strip() != str(a + b):
+                                            st.error("Captcha failed. Please try again.")
+                                        elif not comment.strip():
+                                            st.error(
+                                                "Please add a short description of the problem."
+                                            )
+                                        else:
+                                            report_dir = _BASE / "reports"
+                                            report_dir.mkdir(parents=True, exist_ok=True)
+                                            ts = datetime.now().isoformat().replace(":", "-")
+                                            payload = {
+                                                "reaction_id": int(rid),
+                                                "png_path": rec.get("png_path"),
+                                                "source_path": rec.get("source_path"),
+                                                "user": current_user or "guest",
+                                                "email": email or None,
+                                                "comment": comment.strip(),
+                                                "created_at": datetime.now().isoformat(),
+                                            }
+                                            (report_dir / f"report_{rid}_{ts}.json").write_text(
+                                                json.dumps(payload, indent=2, ensure_ascii=False),
+                                                encoding="utf-8",
+                                            )
+                                            st.success(
+                                                "Thank you! Your report has been saved and will be reviewed."
+                                            )
+                                    except Exception as e:
+                                        st.error(f"Could not save report: {e}")
+
                         st.markdown("### Measurements")
                         if not ms:
                             st.info("No measurements recorded")

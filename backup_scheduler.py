@@ -24,17 +24,17 @@ class BackupScheduler:
         backup_interval_hours: int = 6,
         cleanup_interval_days: int = 1,
         keep_backups_days: int = 7,
-        backup_dir: Path = None,
+        backup_dir: Path | None = None,
     ):
         self.backup_interval = backup_interval_hours * 3600  # Convert to seconds
         self.cleanup_interval = cleanup_interval_days * 24 * 3600  # Convert to seconds
         self.keep_days = keep_backups_days
-        self.backup_dir = backup_dir or (BASE_DIR / "backups")
+        self.backup_dir: Path = backup_dir or (BASE_DIR / "backups")
 
-        self._scheduler_thread = None
+        self._scheduler_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
-        self._last_backup = 0
-        self._last_cleanup = 0
+        self._last_backup: float = 0.0
+        self._last_cleanup: float = 0.0
 
         print("[BACKUP SCHEDULER] Configured:")
         print(f"  - Backup every {backup_interval_hours} hours")
@@ -44,7 +44,7 @@ class BackupScheduler:
 
     def start(self):
         """Start the backup scheduler in a background thread."""
-        if self._scheduler_thread and self._scheduler_thread.is_alive():
+        if self._scheduler_thread is not None and self._scheduler_thread.is_alive():
             print("[BACKUP SCHEDULER] Already running")
             return
 
@@ -55,7 +55,7 @@ class BackupScheduler:
 
     def stop(self):
         """Stop the backup scheduler."""
-        if self._scheduler_thread and self._scheduler_thread.is_alive():
+        if self._scheduler_thread is not None and self._scheduler_thread.is_alive():
             print("[BACKUP SCHEDULER] Stopping...")
             self._stop_event.set()
             self._scheduler_thread.join(timeout=5)
@@ -126,7 +126,7 @@ class BackupScheduler:
 
     def status(self) -> dict:
         """Get scheduler status."""
-        is_running = self._scheduler_thread and self._scheduler_thread.is_alive()
+        is_running = self._scheduler_thread is not None and self._scheduler_thread.is_alive()
         current_time = time.time()
 
         next_backup = None
@@ -163,7 +163,7 @@ _global_scheduler = None
 
 def get_scheduler() -> BackupScheduler:
     """Get the global scheduler instance."""
-    global _global_scheduler
+    global _global_scheduler  # noqa: PLW0603
     if _global_scheduler is None:
         # Configure from environment variables or defaults
         backup_hours = int(os.getenv("BACKUP_INTERVAL_HOURS", "6"))

@@ -58,7 +58,7 @@ def backup_database(db_path: Path, backup_dir: Path, compress: bool = True) -> P
     return backup_path
 
 
-def backup_all_databases(backup_dir: Path = None) -> list[Path]:
+def backup_all_databases(backup_dir: Path | None = None) -> list[Path]:
     """Backup all application databases."""
     if backup_dir is None:
         backup_dir = BASE_DIR / "backups"
