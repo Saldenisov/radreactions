@@ -33,7 +33,7 @@ def preview_png_path_for_pdf(pdf_path: Path) -> Path:
 
 
 def render_pdf_first_page_to_png(
-    pdf_path: Path, out_png: Path | None = None, scale: float = 2.0
+    pdf_path: Path, out_png: Path | None = None, scale: float = 1.5
 ) -> Path:
     """Render the first page of a PDF to a PNG file using PyMuPDF.
 

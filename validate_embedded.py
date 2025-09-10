@@ -160,19 +160,18 @@ def show_validation_interface(current_user):
         except Exception:
             st.sidebar.error("Cannot display DB path information")
 
-    # Compute global stats: by PNG (each PNG is a reaction). CSV presence is optional.
-    agg_total = 0
-    agg_validated = 0
-    for t in TABLES:
-        img_dir, _, _, _ = get_table_paths(t)
-        imgs = sorted([p.name for p in img_dir.glob("*.png")], key=natural_key)
-        agg_total += len(imgs)
-        for img in imgs:
-            png_path = img_dir / img
-            meta = get_validation_meta_by_image(con, str(png_path))
-            if meta.get("validated"):
-                agg_validated += 1
-    agg_percent = (100 * agg_validated / agg_total) if agg_total else 0.0
+    # Use optimized DB-backed statistics with short caching to avoid per-image queries
+    from reactions_db import DB_PATH as _DBP
+    from reactions_db import get_validation_statistics
+
+    @st.cache_data(ttl=30)
+    def _get_stats_cached(db_mtime: float) -> dict[str, Any]:
+        return get_validation_statistics(con)
+
+    stats = _get_stats_cached(_DBP.stat().st_mtime)
+    agg_total = stats["global"]["total_images"]
+    agg_validated = stats["global"]["validated_images"]
+    agg_percent = stats["global"]["validation_percentage"]
 
     st.sidebar.markdown("### **All Tables (Global Stats)**")
     st.sidebar.markdown(f"**Total images:** {agg_total}")
@@ -186,8 +185,13 @@ def show_validation_interface(current_user):
     st.sidebar.markdown(f"IMAGE_DIR exists: {IMAGE_DIR.exists()}")
     st.sidebar.markdown(f"IMAGE_DIR: {IMAGE_DIR}")
 
-    # Determine images directly from directory; compute stats from cached validation data
-    images_all = sorted([p.name for p in IMAGE_DIR.glob("*.png")], key=natural_key)
+    # Determine images directly from directory; cache listing briefly to reduce FS scans
+    @st.cache_data(ttl=30)
+    def _list_table_images_cached(image_dir: str) -> list[str]:
+        p = Path(image_dir)
+        return sorted([q.name for q in p.glob("*.png")], key=natural_key)
+
+    images_all = _list_table_images_cached(str(IMAGE_DIR))
 
     # Build local cache for current table - prefer PNG-level meta, fallback to source-level meta
     # Clear any existing cache to ensure we always get fresh DB state
@@ -1078,7 +1082,7 @@ def show_validation_interface(current_user):
                 if HAS_FITZ:
                     try:
                         doc = fitz.open(pdf_path)
-                        pix = doc.load_page(0).get_pixmap(matrix=fitz.Matrix(3, 3))
+                        pix = doc.load_page(0).get_pixmap(matrix=fitz.Matrix(2, 2))
                         st.image(pix.tobytes(output="png"), use_container_width=True)
                         st.caption(f"PDF source: {pdf_path.name}")
                         pdf_found = True

@@ -30,6 +30,19 @@ def connect(db_path: Path = DB_PATH) -> sqlite3.Connection:
         con.execute("PRAGMA journal_mode = WAL")
     except Exception:
         pass
+    # Performance-oriented PRAGMAs suitable for a network-backed volume
+    try:
+        con.execute("PRAGMA synchronous = NORMAL")  # reduce fsyncs
+    except Exception:
+        pass
+    try:
+        con.execute("PRAGMA temp_store = MEMORY")  # temp tables in RAM
+    except Exception:
+        pass
+    try:
+        con.execute("PRAGMA cache_size = -4000")  # ~4MB page cache
+    except Exception:
+        pass
     return con
 
 

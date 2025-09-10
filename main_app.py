@@ -119,14 +119,40 @@ try:
 
         def _scan():
             try:
+                import os as _os2
+                import time as _time
+
+                # Small delay to avoid competing with cold-start work
+                _time.sleep(float(_os2.getenv("RAD_PREVIEW_SCAN_START_DELAY_SEC", "3")))
+
+                mode = _os2.getenv("RAD_PREVIEW_SCAN_MODE", "recent").lower()  # recent|all
+                window_days = float(_os2.getenv("RAD_PREVIEW_SCAN_WINDOW_DAYS", "2"))
+                cutoff = _time.time() - window_days * 86400
+
+                def _iter_pdfs():
+                    for pdf in base_dir.rglob("latex/*.pdf"):
+                        if mode == "all":
+                            yield pdf
+                        else:
+                            try:
+                                if pdf.stat().st_mtime >= cutoff:
+                                    yield pdf
+                            except Exception:
+                                continue
+
                 count = 0
-                for pdf in base_dir.rglob("latex/*.pdf"):
+                for i, pdf in enumerate(_iter_pdfs(), 1):
                     try:
                         ensure_png_up_to_date(pdf)
                         count += 1
                     except Exception as e:
                         print(f"[MAIN] Preview update failed for {pdf}: {e}")
-                print(f"[MAIN] Initial PDF preview scan complete: {count} PDFs processed")
+                    # Yield periodically to reduce contention
+                    if i % 30 == 0:
+                        _time.sleep(0.1)
+                print(
+                    f"[MAIN] Initial PDF preview scan complete: {count} PDFs processed (mode={mode})"
+                )
             except Exception as e:
                 print(f"[MAIN] Initial PDF preview scan error: {e}")
 
@@ -306,7 +332,15 @@ if _db_paused:
 else:
     try:
         assert con is not None, "Database connection is None"
-        stats = get_validation_statistics(con)
+        # Cache expensive stats for short TTL to reduce DB and FS load
+        from reactions_db import DB_PATH as _DBP
+
+        @st.cache_data(ttl=30)
+        def _get_stats_cached(db_mtime: float) -> dict[str, Any]:
+            con2 = ensure_db()
+            return get_validation_statistics(con2)
+
+        stats = _get_stats_cached(_DBP.stat().st_mtime)
 
         # Global overview
         global_stats = stats["global"]
@@ -402,9 +436,24 @@ with browse_tab:
         with left:
             name_filter = st.text_input("Filter by name/formula", placeholder="type to filter...")
             assert con is not None, "Database connection is None"
-            rows_all = list_reactions(
-                con, name_filter=name_filter or None, limit=2000, validated_only=True
-            )
+            # Cache list results to avoid repeated DB scans on each rerun
+            from reactions_db import DB_PATH as _DBP
+
+            @st.cache_data(ttl=20)
+            def _list_reactions_cached(
+                name_filter: str, validated_only: bool, limit: int, db_mtime: float
+            ) -> list[dict]:
+                con2 = ensure_db()
+                rows = list_reactions(
+                    con2,
+                    name_filter=name_filter or None,
+                    limit=limit,
+                    validated_only=validated_only,
+                )
+                # Convert sqlite3.Row to plain dicts for caching
+                return [dict(r) for r in rows]
+
+            rows_all = _list_reactions_cached(name_filter or "", True, 2000, _DBP.stat().st_mtime)
             if not rows_all:
                 st.info("No validated reactions yet.")
             else:
@@ -500,7 +549,7 @@ with browse_tab:
                                             try:
                                                 doc = fitz.open(_pdf)
                                                 pix = doc.load_page(0).get_pixmap(
-                                                    matrix=fitz.Matrix(2.5, 2.5)
+                                                    matrix=fitz.Matrix(2.0, 2.0)
                                                 )
                                                 st.image(
                                                     pix.tobytes(output="png"),
