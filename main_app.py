@@ -99,6 +99,52 @@ print(
     f"[VOLUME DEBUG] /data contents: {list(Path('/data').glob('*')) if Path('/data').exists() else 'N/A'}"
 )
 
+# One-time initial scan to ensure PNG previews exist for PDFs on Railway
+try:
+    import threading as _th
+
+    from config import get_data_dir as _get_data_dir
+    from pdf_preview import ensure_png_up_to_date
+
+    def _start_initial_pdf_preview_scan():
+        try:
+            base_dir = _get_data_dir()
+        except Exception:
+            base_dir = Path("/data")
+        if not (Path("/data").exists() and base_dir.exists()):
+            print(
+                f"[MAIN] Skipping initial PDF preview scan (not container or /data missing): base_dir={base_dir}"
+            )
+            return
+
+        def _scan():
+            try:
+                count = 0
+                for pdf in base_dir.rglob("latex/*.pdf"):
+                    try:
+                        ensure_png_up_to_date(pdf)
+                        count += 1
+                    except Exception as e:
+                        print(f"[MAIN] Preview update failed for {pdf}: {e}")
+                print(f"[MAIN] Initial PDF preview scan complete: {count} PDFs processed")
+            except Exception as e:
+                print(f"[MAIN] Initial PDF preview scan error: {e}")
+
+        t = _th.Thread(target=_scan, daemon=True)
+        t.start()
+        print("[MAIN] Initial PDF preview scan started in background")
+
+    # Guard to run only once per container process (Streamlit re-runs the script)
+    import os as _os
+
+    if _os.environ.get("RAD_PDF_PREVIEW_SCAN_STARTED") != "1":
+        _os.environ["RAD_PDF_PREVIEW_SCAN_STARTED"] = "1"
+        _start_initial_pdf_preview_scan()
+    else:
+        print("[MAIN] Initial PDF preview scan already started (guarded)")
+except Exception as e:
+    print(f"[MAIN] Warning: Could not start initial PDF preview scan: {e}")
+
 current_user = check_authentication()
 print(f"[MAIN PAGE] Current user from check_authentication(): {current_user}")
 

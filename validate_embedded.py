@@ -9,6 +9,7 @@ from PIL import Image, UnidentifiedImageError
 
 from auth_db import auth_db, show_user_profile_page
 from config import AVAILABLE_TABLES, BASE_DIR, get_table_paths
+from pdf_preview import ensure_png_up_to_date, preview_png_path_for_pdf
 from pdf_utils import compile_tex_to_pdf, tsv_to_full_latex_article
 from tsv_utils import correct_tsv_file, tsv_to_visible, visible_to_tsv
 
@@ -1012,6 +1013,12 @@ def show_validation_interface(current_user):
                             st.error(f"Compilation failed:\n{out}")
                         else:
                             st.success("PDF recompiled successfully!")
+                            # Update preview PNG on success (Railway watcher may also update it)
+                            try:
+                                pdf_out = latex_path.parent / (latex_path.stem + ".pdf")
+                                ensure_png_up_to_date(pdf_out)
+                            except Exception as _e:
+                                print(f"[VALIDATE] Preview update failed: {_e}")
                             # Mark PDF as updated for cross-tab refresh
                             st.session_state[f"pdf_updated_{current_image}"] = (
                                 datetime.now().isoformat()
@@ -1051,6 +1058,23 @@ def show_validation_interface(current_user):
         pdf_found = False
         for pdf_path in possible_pdf_paths:
             if pdf_path.exists():
+                # Ensure preview is up-to-date (creates it if missing)
+                try:
+                    ensure_png_up_to_date(pdf_path)
+                except Exception as _e:
+                    print(f"[VALIDATE] ensure_png_up_to_date failed: {_e}")
+                # Prefer pre-rendered PNG preview if available (generated on Railway or just now)
+                preview_png = preview_png_path_for_pdf(pdf_path)
+                if preview_png.exists():
+                    try:
+                        st.image(str(preview_png), use_container_width=True)
+                        st.caption(f"PDF source: {pdf_path.name}")
+                        pdf_found = True
+                        break
+                    except Exception as e:
+                        st.warning(f"Could not display preview PNG {preview_png.name}: {e}")
+                        # Fallback to direct PDF rendering below
+
                 if HAS_FITZ:
                     try:
                         doc = fitz.open(pdf_path)
@@ -1131,6 +1155,10 @@ def show_validation_interface(current_user):
 
                         # Display the updated PDF immediately below the editor
                         pdf_path = latex_path.parent / (latex_path.stem + ".pdf")
+                        try:
+                            ensure_png_up_to_date(pdf_path)
+                        except Exception as _e:
+                            print(f"[VALIDATE] Preview update failed: {_e}")
                         if pdf_path.exists() and HAS_FITZ:
                             st.markdown("### Updated PDF Preview")
                             try:
@@ -1215,6 +1243,10 @@ def show_validation_interface(current_user):
 
                     # Display the updated PDF immediately below the editor
                     pdf_path = latex_path.parent / (latex_path.stem + ".pdf")
+                    try:
+                        ensure_png_up_to_date(pdf_path)
+                    except Exception as _e:
+                        print(f"[VALIDATE] Preview update failed: {_e}")
                     if pdf_path.exists() and HAS_FITZ:
                         st.markdown("### Updated PDF Preview")
                         try:
@@ -1313,6 +1345,10 @@ def show_validation_interface(current_user):
                             datetime.now().isoformat()
                         )
                         pdf_file = latex_path.parent / (latex_path.stem + ".pdf")
+                        try:
+                            ensure_png_up_to_date(pdf_file)
+                        except Exception as _e:
+                            print(f"[VALIDATE] Preview update failed: {_e}")
                         if pdf_file.exists():
                             if HAS_FITZ:
                                 try:
