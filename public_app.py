@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import json
 import os
 import random
@@ -211,6 +212,12 @@ REPORTS_DB_PATH = Path(
         else str(BASE_DIR / "public_problem_reports.db"),
     )
 )
+USAGE_DB_PATH = Path(
+    os.getenv(
+        "RAD_PUBLIC_USAGE_DB",
+        str(PUBLIC_DATA_DIR / "public_usage_stats.db"),
+    )
+)
 CONTACT_EMAIL = "sergey.denisov@universite-paris-saclay.fr"
 
 
@@ -226,6 +233,165 @@ def _candidate_paths(env_name: str, defaults: list[Path]) -> list[Path]:
 
 def _iso_now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def _usage_connect() -> sqlite3.Connection:
+    USAGE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(str(USAGE_DB_PATH))
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA busy_timeout = 5000")
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS usage_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          created_at TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          page TEXT NOT NULL DEFAULT '',
+          item_key TEXT NOT NULL DEFAULT '',
+          ip_hash TEXT NOT NULL DEFAULT '',
+          user_agent_hash TEXT NOT NULL DEFAULT '',
+          metadata_json TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
+    con.execute("CREATE INDEX IF NOT EXISTS idx_usage_events_type ON usage_events(event_type)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_usage_events_created ON usage_events(created_at)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_usage_events_ip ON usage_events(ip_hash)")
+    con.commit()
+    return con
+
+
+def _request_headers() -> dict[str, str]:
+    try:
+        headers = getattr(st.context, "headers", {}) or {}
+        return {str(key).lower(): str(value) for key, value in dict(headers).items()}
+    except Exception:
+        return {}
+
+
+def _client_ip() -> str:
+    headers = _request_headers()
+    for key in ("cf-connecting-ip", "x-real-ip", "x-forwarded-for", "forwarded"):
+        value = headers.get(key, "").strip()
+        if not value:
+            continue
+        if key == "x-forwarded-for":
+            return value.split(",", 1)[0].strip()
+        match = re.search(r"for=([^;,]+)", value, flags=re.I)
+        return match.group(1).strip('" ') if match else value
+    return ""
+
+
+def _hash_usage_value(value: str) -> str:
+    value = value.strip()
+    if not value:
+        return ""
+    salt = os.getenv("RAD_USAGE_HASH_SALT", "radreactions-public-usage")
+    return hashlib.sha256(f"{salt}:{value}".encode("utf-8")).hexdigest()
+
+
+def _log_usage_event(
+    event_type: str,
+    page: str,
+    item_key: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    try:
+        headers = _request_headers()
+        con = _usage_connect()
+        try:
+            con.execute(
+                """
+                INSERT INTO usage_events (
+                    created_at, event_type, page, item_key, ip_hash,
+                    user_agent_hash, metadata_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _iso_now(),
+                    event_type,
+                    page,
+                    item_key,
+                    _hash_usage_value(_client_ip()),
+                    _hash_usage_value(headers.get("user-agent", "")),
+                    json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True),
+                ),
+            )
+            con.commit()
+        finally:
+            con.close()
+        _usage_summary.clear()
+    except Exception:
+        return
+
+
+def _track_visit(page: str) -> None:
+    key = f"usage_visit_logged:{page}"
+    if st.session_state.get(key):
+        return
+    _log_usage_event("visit", page)
+    st.session_state[key] = True
+
+
+def _track_search(query: str, database: str, scope: str) -> None:
+    cleaned = query.strip()
+    if not cleaned:
+        return
+    fingerprint = f"{cleaned}|{database}|{scope}"
+    if st.session_state.get("last_logged_search") == fingerprint:
+        return
+    _log_usage_event(
+        "search",
+        "home",
+        item_key=database,
+        metadata={"query": cleaned[:200], "database": database, "scope": scope},
+    )
+    st.session_state["last_logged_search"] = fingerprint
+
+
+@st.cache_data(ttl=30)
+def _usage_summary(db_mtime: float) -> dict[str, int]:
+    if not USAGE_DB_PATH.exists():
+        return {"visits": 0, "searches": 0, "unique_ips": 0, "downloads": 0}
+    con = _usage_connect()
+    try:
+        row = con.execute(
+            """
+            SELECT
+              SUM(CASE WHEN event_type = 'visit' THEN 1 ELSE 0 END) AS visits,
+              SUM(CASE WHEN event_type = 'search' THEN 1 ELSE 0 END) AS searches,
+              SUM(CASE WHEN event_type = 'download' THEN 1 ELSE 0 END) AS downloads,
+              COUNT(DISTINCT NULLIF(ip_hash, '')) AS unique_ips
+            FROM usage_events
+            """
+        ).fetchone()
+        return {
+            "visits": int(row["visits"] or 0),
+            "searches": int(row["searches"] or 0),
+            "unique_ips": int(row["unique_ips"] or 0),
+            "downloads": int(row["downloads"] or 0),
+        }
+    finally:
+        con.close()
+
+
+def _usage_db_mtime() -> float:
+    try:
+        return USAGE_DB_PATH.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _render_usage_footer() -> None:
+    summary = _usage_summary(_usage_db_mtime())
+    st.divider()
+    st.caption("Project activity")
+    cols = st.columns(4)
+    cols[0].metric("Visits", f"{summary['visits']:,}")
+    cols[1].metric("Searches", f"{summary['searches']:,}")
+    cols[2].metric("Unique IPs", f"{summary['unique_ips']:,}")
+    cols[3].metric("Downloads", f"{summary['downloads']:,}")
 
 
 @st.cache_data(ttl=3600)
@@ -2291,6 +2457,7 @@ def database_page() -> None:
         st.query_params["scope"] = search_scope
         st.query_params["db"] = database
     if active_query:
+        _track_search(active_query, database, search_scope)
         display_limit = _search_display_limit(active_query)
         if database in {"new", "both"} and not _new_available():
             st.error("New DB is not available locally.")
@@ -2436,7 +2603,7 @@ def downloads_page() -> None:
                 continue
 
             st.caption(f"{path.name} · {_format_size(path)}")
-            st.download_button(
+            downloaded = st.download_button(
                 "Download PDF",
                 data=_read_file(str(path)),
                 file_name=path.name,
@@ -2444,6 +2611,13 @@ def downloads_page() -> None:
                 width="stretch",
                 key=f"download_{item['key']}",
             )
+            if downloaded:
+                _log_usage_event(
+                    "download",
+                    "downloads",
+                    item_key=item["key"],
+                    metadata={"file": path.name, "kind": "pdf"},
+                )
 
     st.divider()
     st.subheader("References")
@@ -2456,13 +2630,20 @@ def downloads_page() -> None:
     else:
         bibtex_data, bibtex_count = _bibtex_export(_db_mtime())
     st.caption(f"{bibtex_count} DOI references")
-    st.download_button(
+    downloaded_bibtex = st.download_button(
         "Download BibTeX",
         data=bibtex_data,
         file_name="radreactions_references_with_doi.bib",
         mime="application/x-bibtex",
         width="stretch",
     )
+    if downloaded_bibtex:
+        _log_usage_event(
+            "download",
+            "downloads",
+            item_key="bibtex",
+            metadata={"file": "radreactions_references_with_doi.bib", "kind": "bibtex"},
+        )
 
 
 def report_reaction_page() -> None:
@@ -2707,15 +2888,32 @@ def developer_exports_page() -> None:
         st.json(json.loads(data.decode("utf-8")))
 
 
+def _page_key_from_path(path: str) -> str:
+    if path.endswith("/reaction_detail_page"):
+        return "reaction_detail"
+    if path.endswith("/downloads_page"):
+        return "downloads"
+    if path.endswith("/report_reaction_page"):
+        return "report_reaction"
+    if path.endswith("/suggest_articles_page"):
+        return "suggest_articles"
+    if path.endswith("/developer_exports_page"):
+        return "developer_exports"
+    return "home"
+
+
 def main() -> None:
     current_path = urlparse(str(st.context.url)).path.rstrip("/")
     if current_path.endswith("/developer_exports_page"):
+        _track_visit("developer_exports")
         developer_exports_page()
         return
 
+    _track_visit(_page_key_from_path(current_path))
     _render_login_controls()
     if current_path.endswith("/reaction_detail_page"):
         reaction_detail_page()
+        _render_usage_footer()
         return
 
     pages = [
@@ -2725,6 +2923,7 @@ def main() -> None:
         st.Page(suggest_articles_page, title="Suggest Articles"),
     ]
     st.navigation(pages).run()
+    _render_usage_footer()
 
 
 if __name__ == "__main__":
