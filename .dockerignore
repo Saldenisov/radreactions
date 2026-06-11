@@ -1,0 +1,29 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.log
+.env
+.venv
+.vscode
+.git
+data-full/**/__pycache__
+# node/npm
+node_modules
+npm-debug.log
+yarn-error.log
+# python build
+build
+dist
+*.egg-info
+# tests
+*test_*.py
+data
+tmp
+tools/bin/
+tools/bin/**
+*.dmg
+*.zip
+*.jar
+*.aux
+*.log
