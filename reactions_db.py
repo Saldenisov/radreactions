@@ -175,6 +175,18 @@ def ensure_db(db_path: Path = DB_PATH) -> sqlite3.Connection:
         cols_ref = {row[1] for row in con.execute("PRAGMA table_info(references_map)").fetchall()}
         if "raw_text" not in cols_ref:
             con.execute("ALTER TABLE references_map ADD COLUMN raw_text TEXT")
+        reference_columns = {
+            "doi_score": "REAL",
+            "doi_resolver": "TEXT",
+            "doi_validation_notes": "TEXT",
+            "doi_title_similarity_score": "REAL",
+            "doi_title_similarity_level": "TEXT NOT NULL DEFAULT 'unknown'",
+            "doi_trust_level": "TEXT NOT NULL DEFAULT 'unknown'",
+            "doi_trust_notes": "TEXT NOT NULL DEFAULT '{}'",
+        }
+        for column, definition in reference_columns.items():
+            if column not in cols_ref:
+                con.execute(f"ALTER TABLE references_map ADD COLUMN {column} {definition}")
         con.commit()
     except Exception:
         pass
@@ -851,7 +863,10 @@ def get_reaction_with_measurements(con: sqlite3.Connection, reaction_id: int) ->
         return {}
     ms = con.execute(
         """
-        SELECT m.*, re.buxton_code, re.citation_text, re.doi, re.doi_status
+        SELECT m.*, re.buxton_code, re.citation_text, re.doi, re.doi_status,
+               re.doi_score, re.doi_resolver, re.doi_validation_notes,
+               re.doi_title_similarity_score, re.doi_title_similarity_level,
+               re.doi_trust_level, re.doi_trust_notes
         FROM measurements m
         LEFT JOIN references_map re ON m.reference_id = re.id
         WHERE m.reaction_id = ?

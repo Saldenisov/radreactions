@@ -2247,7 +2247,7 @@ def _render_reaction_details(reaction: dict[str, Any], measurements: list[dict[s
         ref = item.get("citation_text") or item.get("buxton_code") or item.get("references_raw") or ""
         links = []
         if item.get("doi"):
-            links.append(f"[DOI](https://doi.org/{item['doi']})")
+            links.append(_doi_badge_html(item))
         if item.get("source_url"):
             links.append(f"[source]({item['source_url']})")
         suffix = f" · {', '.join(links)}" if links else ""
@@ -2271,7 +2271,7 @@ def _render_reaction_details(reaction: dict[str, Any], measurements: list[dict[s
                 unsafe_allow_html=True,
             )
         if ref or suffix:
-            st.caption(f"{ref}{suffix}")
+            st.markdown(f"{escape(str(ref))}{suffix}", unsafe_allow_html=True)
 
 
 def _render_new_reaction_details(reaction: dict[str, Any], measurements: list[dict[str, Any]]) -> None:
