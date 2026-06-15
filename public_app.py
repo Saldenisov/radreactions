@@ -201,7 +201,7 @@ BIBTEX_DOWNLOAD_PATH = Path(
 NEW_DB_PATH = Path(
     os.getenv(
         "RAD_PUBLIC_NEW_DB",
-        str(BASE_DIR / "new_reactions.sqlite"),
+        str(BASE_DIR / "new_db.sqlite"),
     )
 )
 REPORTS_DB_PATH = Path(
@@ -529,6 +529,39 @@ def _inject_seo_metadata() -> None:
           font-size: 0.72em;
           line-height: 0;
         }
+        .doi-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.35rem;
+          border: 1px solid;
+          border-radius: 999px;
+          padding: 0.18rem 0.62rem;
+          font-size: 0.82rem;
+          font-weight: 650;
+          line-height: 1.3;
+          text-decoration: none !important;
+          white-space: normal;
+        }
+        .doi-pill-high {
+          background: #dcfce7;
+          border-color: #86efac;
+          color: #166534 !important;
+        }
+        .doi-pill-medium {
+          background: #ffedd5;
+          border-color: #fdba74;
+          color: #9a3412 !important;
+        }
+        .doi-pill-low {
+          background: #fee2e2;
+          border-color: #fca5a5;
+          color: #991b1b !important;
+        }
+        .doi-pill-unknown {
+          background: #f1f5f9;
+          border-color: #cbd5e1;
+          color: #334155 !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -763,6 +796,43 @@ def _new_species_text(raw: Any) -> str:
     return " ".join(values)
 
 
+def _score_label(value: Any) -> str:
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return "score -"
+    return f"score {score:.1f}" if abs(score) >= 10 else f"score {score:.2f}"
+
+
+def _similarity_label(value: Any) -> str:
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return "title -"
+    return f"title {score:.2f}"
+
+
+def _doi_badge_html(reaction: dict[str, Any]) -> str:
+    doi = str(reaction.get("doi") or "").strip()
+    level = str(reaction.get("doi_trust_level") or "unknown").strip().lower()
+    if level not in {"high", "medium", "low", "unknown"}:
+        level = "unknown"
+    parts = [
+        f"DOI {escape(doi)}" if doi else "DOI missing",
+        escape(_score_label(reaction.get("doi_score"))),
+        escape(_similarity_label(reaction.get("doi_title_similarity_score"))),
+    ]
+    label = " · ".join(parts)
+    title = escape(str(reaction.get("doi_trust_notes") or "").strip())
+    class_name = f"doi-pill doi-pill-{level}"
+    if doi:
+        return (
+            f'<a class="{class_name}" href="https://doi.org/{quote(doi)}" '
+            f'target="_blank" rel="noopener noreferrer" title="{title}">{label}</a>'
+        )
+    return f'<span class="{class_name}" title="{title}">{label}</span>'
+
+
 @st.cache_data(ttl=30)
 def _new_reaction_details(reaction_id: int, new_mtime: float) -> dict[str, Any]:
     con = _new_connect()
@@ -770,7 +840,10 @@ def _new_reaction_details(reaction_id: int, new_mtime: float) -> dict[str, Any]:
         reaction = con.execute(
             """
             SELECT r.*, ref.citation_text, ref.doi, ref.source_url, ref.volume, ref.pages,
-                   ref.bibtex, ref.doi_status
+                   ref.bibtex, ref.doi_status, ref.doi_score, ref.doi_resolver,
+                   ref.doi_validation_notes, ref.doi_title_similarity_score,
+                   ref.doi_title_similarity_level, ref.doi_trust_level,
+                   ref.doi_trust_notes
             FROM new_reactions r
             LEFT JOIN new_references ref ON ref.id = r.reference_id
             WHERE r.id = ?
@@ -2238,8 +2311,8 @@ def _render_new_reaction_details(reaction: dict[str, Any], measurements: list[di
     if reaction.get("citation_text"):
         st.caption(str(reaction["citation_text"]))
     link_cols = st.columns(3)
-    if reaction.get("doi"):
-        link_cols[0].link_button("DOI", f"https://doi.org/{reaction['doi']}", width="content")
+    with link_cols[0]:
+        st.markdown(_doi_badge_html(reaction), unsafe_allow_html=True)
     if reaction.get("source_url"):
         link_cols[1].link_button("New reference", reaction["source_url"], width="content")
     if reaction.get("detail_url"):
