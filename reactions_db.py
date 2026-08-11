@@ -8,6 +8,10 @@ from config import BASE_DIR
 
 DB_PATH = BASE_DIR / "reactions.db"
 
+
+class ReactionDatabaseUnavailable(FileNotFoundError):
+    """Raised when public code attempts to read an unavailable scientific database."""
+
 TABLE_CATEGORY = {
     5: "Rate constants for radical-radical reactions",
     6: "Rate constants for reactions of hydrated electrons in aqueous solution",
@@ -17,32 +21,23 @@ TABLE_CATEGORY = {
 }
 
 
-def connect(db_path: Path = DB_PATH) -> sqlite3.Connection:
-    con = sqlite3.connect(str(db_path))
+def connect(db_path: Path = DB_PATH, *, read_only: bool = False) -> sqlite3.Connection:
+    """Open an existing reaction database without implicitly creating one."""
+    path = Path(db_path)
+    if not path.is_file():
+        raise ReactionDatabaseUnavailable(f"Reaction database is unavailable: {path}")
+    if read_only:
+        con = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
+    else:
+        con = sqlite3.connect(str(path))
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
-    # Reduce 'database is locked' errors by waiting up to 5s for locks
-    try:
-        con.execute("PRAGMA busy_timeout = 5000")
-    except Exception:
-        pass
-    try:
+    con.execute("PRAGMA busy_timeout = 5000")
+    if not read_only:
         con.execute("PRAGMA journal_mode = WAL")
-    except Exception:
-        pass
-    # Performance-oriented PRAGMAs suitable for a network-backed volume
-    try:
-        con.execute("PRAGMA synchronous = NORMAL")  # reduce fsyncs
-    except Exception:
-        pass
-    try:
-        con.execute("PRAGMA temp_store = MEMORY")  # temp tables in RAM
-    except Exception:
-        pass
-    try:
-        con.execute("PRAGMA cache_size = -4000")  # ~4MB page cache
-    except Exception:
-        pass
+        con.execute("PRAGMA synchronous = NORMAL")
+    con.execute("PRAGMA temp_store = MEMORY")
+    con.execute("PRAGMA cache_size = -4000")
     return con
 
 
@@ -87,6 +82,7 @@ CREATE TABLE IF NOT EXISTS references_map (
   citation_text TEXT,
   doi TEXT UNIQUE,
   doi_status TEXT NOT NULL DEFAULT 'unknown',
+  bibtex TEXT,
   raw_text TEXT,
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -138,87 +134,85 @@ COMMIT;
 MIGRATION_NAME_INIT = "001_init"
 
 
-def ensure_db(db_path: Path = DB_PATH) -> sqlite3.Connection:
-    con = connect(db_path)
-    # check migration applied
-    con.execute(
-        "CREATE TABLE IF NOT EXISTS schema_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, applied_at TEXT NOT NULL DEFAULT (datetime('now')))"
-    )
+def initialize_db(db_path: Path = DB_PATH) -> sqlite3.Connection:
+    """Explicitly create or migrate a writable reaction database."""
+    path = Path(db_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    created = not path.exists()
+    con = sqlite3.connect(str(path))
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA foreign_keys = ON")
+    con.execute("PRAGMA busy_timeout = 5000")
+    con.execute("PRAGMA journal_mode = WAL")
+    con.execute("PRAGMA synchronous = NORMAL")
+    con.execute("PRAGMA temp_store = MEMORY")
+    con.execute("PRAGMA cache_size = -4000")
+    if created:
+        con.executescript(SCHEMA_SQL)
+        con.execute("INSERT INTO schema_migrations(name) VALUES (?)", (MIGRATION_NAME_INIT,))
+        con.commit()
+    else:
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, applied_at TEXT NOT NULL DEFAULT (datetime('now')))"
+        )
     cur = con.execute("SELECT 1 FROM schema_migrations WHERE name = ?", (MIGRATION_NAME_INIT,))
     if cur.fetchone() is None:
         con.executescript(SCHEMA_SQL)
         con.execute("INSERT INTO schema_migrations(name) VALUES (?)", (MIGRATION_NAME_INIT,))
         con.commit()
-    # Lightweight migrations for added columns/indexes if DB already existed
-    try:
-        cols_r = {row[1] for row in con.execute("PRAGMA table_info(reactions)").fetchall()}
-        if "png_path" not in cols_r:
-            con.execute("ALTER TABLE reactions ADD COLUMN png_path TEXT")
-            con.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_reactions_png_path ON reactions(png_path)"
-            )
-        if "source_path" not in cols_r:
-            con.execute("ALTER TABLE reactions ADD COLUMN source_path TEXT")
-        if "validated_by" not in cols_r:
-            con.execute("ALTER TABLE reactions ADD COLUMN validated_by TEXT")
-        if "validated_at" not in cols_r:
-            con.execute("ALTER TABLE reactions ADD COLUMN validated_at TEXT")
-        if "skipped" not in cols_r:
-            con.execute("ALTER TABLE reactions ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0")
-        if "skipped_by" not in cols_r:
-            con.execute("ALTER TABLE reactions ADD COLUMN skipped_by TEXT")
-        if "skipped_at" not in cols_r:
-            con.execute("ALTER TABLE reactions ADD COLUMN skipped_at TEXT")
-        cols_m = {row[1] for row in con.execute("PRAGMA table_info(measurements)").fetchall()}
-        if "references_raw" not in cols_m:
-            con.execute("ALTER TABLE measurements ADD COLUMN references_raw TEXT")
-        cols_ref = {row[1] for row in con.execute("PRAGMA table_info(references_map)").fetchall()}
-        if "raw_text" not in cols_ref:
-            con.execute("ALTER TABLE references_map ADD COLUMN raw_text TEXT")
-        reference_columns = {
-            "doi_score": "REAL",
-            "doi_resolver": "TEXT",
-            "doi_validation_notes": "TEXT",
-            "doi_title_similarity_score": "REAL",
-            "doi_title_similarity_level": "TEXT NOT NULL DEFAULT 'unknown'",
-            "doi_trust_level": "TEXT NOT NULL DEFAULT 'unknown'",
-            "doi_trust_notes": "TEXT NOT NULL DEFAULT '{}'",
-        }
-        for column, definition in reference_columns.items():
-            if column not in cols_ref:
-                con.execute(f"ALTER TABLE references_map ADD COLUMN {column} {definition}")
-        con.commit()
-    except Exception:
-        pass
-
-    # Migration: update table_category strings per TABLE_CATEGORY mapping
-    try:
-        for tno, cat in TABLE_CATEGORY.items():
-            con.execute("UPDATE reactions SET table_category = ? WHERE table_no = ?", (cat, tno))
-        con.commit()
-    except Exception:
-        pass
-
-    # Ensure performance indexes exist
-    try:
-        index_statements = [
-            "CREATE INDEX IF NOT EXISTS idx_reactions_source_path ON reactions(source_path)",
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_reactions_png_path ON reactions(png_path)",
-            "CREATE INDEX IF NOT EXISTS idx_reactions_validated ON reactions(validated)",
-            "CREATE INDEX IF NOT EXISTS idx_reactions_skipped ON reactions(skipped)",
-            "CREATE INDEX IF NOT EXISTS idx_reactions_table_no ON reactions(table_no)",
-            "CREATE INDEX IF NOT EXISTS idx_measurements_reaction_source ON measurements(reaction_id, source_path)",
-        ]
-        for stmt in index_statements:
-            try:
-                con.execute(stmt)
-            except Exception:
-                pass
-        con.commit()
-    except Exception:
-        pass
-
+    cols_r = {row[1] for row in con.execute("PRAGMA table_info(reactions)").fetchall()}
+    if "png_path" not in cols_r:
+        con.execute("ALTER TABLE reactions ADD COLUMN png_path TEXT")
+    if "source_path" not in cols_r:
+        con.execute("ALTER TABLE reactions ADD COLUMN source_path TEXT")
+    if "validated_by" not in cols_r:
+        con.execute("ALTER TABLE reactions ADD COLUMN validated_by TEXT")
+    if "validated_at" not in cols_r:
+        con.execute("ALTER TABLE reactions ADD COLUMN validated_at TEXT")
+    if "skipped" not in cols_r:
+        con.execute("ALTER TABLE reactions ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0")
+    if "skipped_by" not in cols_r:
+        con.execute("ALTER TABLE reactions ADD COLUMN skipped_by TEXT")
+    if "skipped_at" not in cols_r:
+        con.execute("ALTER TABLE reactions ADD COLUMN skipped_at TEXT")
+    cols_m = {row[1] for row in con.execute("PRAGMA table_info(measurements)").fetchall()}
+    if "references_raw" not in cols_m:
+        con.execute("ALTER TABLE measurements ADD COLUMN references_raw TEXT")
+    cols_ref = {row[1] for row in con.execute("PRAGMA table_info(references_map)").fetchall()}
+    if "raw_text" not in cols_ref:
+        con.execute("ALTER TABLE references_map ADD COLUMN raw_text TEXT")
+    if "bibtex" not in cols_ref:
+        con.execute("ALTER TABLE references_map ADD COLUMN bibtex TEXT")
+    reference_columns = {
+        "doi_score": "REAL",
+        "doi_resolver": "TEXT",
+        "doi_validation_notes": "TEXT",
+        "doi_title_similarity_score": "REAL",
+        "doi_title_similarity_level": "TEXT NOT NULL DEFAULT 'unknown'",
+        "doi_trust_level": "TEXT NOT NULL DEFAULT 'unknown'",
+        "doi_trust_notes": "TEXT NOT NULL DEFAULT '{}'",
+    }
+    for column, definition in reference_columns.items():
+        if column not in cols_ref:
+            con.execute(f"ALTER TABLE references_map ADD COLUMN {column} {definition}")
+    for tno, cat in TABLE_CATEGORY.items():
+        con.execute("UPDATE reactions SET table_category = ? WHERE table_no = ?", (cat, tno))
+    for statement in (
+        "CREATE INDEX IF NOT EXISTS idx_reactions_source_path ON reactions(source_path)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_reactions_png_path ON reactions(png_path)",
+        "CREATE INDEX IF NOT EXISTS idx_reactions_validated ON reactions(validated)",
+        "CREATE INDEX IF NOT EXISTS idx_reactions_skipped ON reactions(skipped)",
+        "CREATE INDEX IF NOT EXISTS idx_reactions_table_no ON reactions(table_no)",
+        "CREATE INDEX IF NOT EXISTS idx_measurements_reaction_source ON measurements(reaction_id, source_path)",
+    ):
+        con.execute(statement)
+    con.commit()
     return con
+
+
+def ensure_db(db_path: Path = DB_PATH) -> sqlite3.Connection:
+    """Open existing scientific data read-only; initialization is explicit."""
+    return connect(db_path, read_only=True)
 
 
 # ---------------- Canonicalization -----------------
@@ -233,38 +227,25 @@ _spaces_re = re.compile(r"\s+")
 
 
 def _extract_ce_payload(s: str) -> str | None:
-    """Extract the payload inside the first \ce{...} block, preserving nested braces.
+    r"""Extract payload inside first \ce{...} block, preserving nested braces.
 
     Returns the inner text without the outer braces, or None if no \ce{...} found.
     Handles escaped characters and nested { } pairs.
     """
-    try:
-        start = s.find(r"\\ce{")
-        if start == -1:
-            return None
-        i = start + 4  # position after "\\ce{"
-        n = len(s)
-        depth = 1
-        j = i
-        while j < n and depth > 0:
-            c = s[j]
-            if c == "\\":
-                # Skip escaped char
-                j += 2
-                continue
-            if c == "{":
-                depth += 1
-            elif c == "}":
-                depth -= 1
-            j += 1
-        if depth == 0:
-            # j now points just after the matching closing '}'
-            return s[i : j - 1]
-        # Fallback: unbalanced braces; capture until first closing brace as last resort
-        m = re.search(r"\\ce\{([^}]*)\}", s)
-        return m.group(1) if m else None
-    except Exception:
+    normalized = s.replace(r"\\ce{", r"\ce{")
+    start = normalized.find(r"\ce{")
+    if start == -1:
         return None
+    i = start + len(r"\ce{")
+    depth = 1
+    j = i
+    while j < len(normalized) and depth > 0:
+        if normalized[j] == "{":
+            depth += 1
+        elif normalized[j] == "}":
+            depth -= 1
+        j += 1
+    return normalized[i : j - 1] if depth == 0 else None
 
 
 radical_map = {
@@ -446,19 +427,12 @@ def get_or_create_reaction(
         )
         return rid
 
-    # Fallback: if no matching PNG row, try matching by source_path (exact, then by filename)
+    # If PNG is unavailable, source-path identity must still be exact.
     if src_canon:
         row = con.execute(
             "SELECT id FROM reactions WHERE source_path = ? ORDER BY validated DESC LIMIT 1",
             (src_canon,),
         ).fetchone()
-        if not row:
-            filename = Path(source_path).name if source_path else None
-            if filename:
-                row = con.execute(
-                    "SELECT id FROM reactions WHERE source_path LIKE '%' || ? ORDER BY validated DESC LIMIT 1",
-                    (filename,),
-                ).fetchone()
         if row:
             rid = row[0]
             con.execute(
@@ -573,19 +547,28 @@ def search_reactions(
 ) -> list[sqlite3.Row]:
     if not query:
         return []
-    q = query.strip()
+    terms = re.findall(r"[\w•.-]+", query, flags=re.UNICODE)
+    if not terms:
+        return []
+    q = " AND ".join(f'"{term.replace(chr(34), "")}"' for term in terms)
     if table_no is None:
         sql = (
             "SELECT r.* FROM reactions r JOIN reactions_fts f ON r.id = f.rowid "
             "WHERE f.reactions_fts MATCH ? ORDER BY r.table_no, r.id LIMIT ?"
         )
-        return con.execute(sql, (q, limit)).fetchall()
+        try:
+            return con.execute(sql, (q, limit)).fetchall()
+        except sqlite3.OperationalError:
+            return []
     else:
         sql = (
             "SELECT r.* FROM reactions r JOIN reactions_fts f ON r.id = f.rowid "
             "WHERE r.table_no = ? AND f.reactions_fts MATCH ? ORDER BY r.id LIMIT ?"
         )
-        return con.execute(sql, (table_no, q, limit)).fetchall()
+        try:
+            return con.execute(sql, (table_no, q, limit)).fetchall()
+        except sqlite3.OperationalError:
+            return []
 
 
 def count_reactions(con: sqlite3.Connection) -> int:
@@ -747,16 +730,14 @@ def get_table_row_counts(con: sqlite3.Connection, table_no: int) -> dict[str, in
 
 
 def canonicalize_source_path(p: str) -> str:
+    path = Path(p)
+    if not path.is_absolute():
+        return path.as_posix()
+    resolved = path.resolve()
     try:
-        base = Path(BASE_DIR).resolve()
-        pp = Path(p).resolve()
-        try:
-            rel = pp.relative_to(base)
-            return str(rel).replace("\\", "/")
-        except Exception:
-            return pp.name  # fallback to filename-only
-    except Exception:
-        return Path(p).name
+        return resolved.relative_to(Path(BASE_DIR).resolve()).as_posix()
+    except ValueError:
+        return resolved.as_posix()
 
 
 def set_validated_by_source(
@@ -769,7 +750,6 @@ def set_validated_by_source(
 ) -> int:
     """Set validated flag and metadata for all reactions from a given source path."""
     src_canon = canonicalize_source_path(source_path)
-    # First try exact canonical match
     if validated:
         cur = con.execute(
             "UPDATE reactions SET validated = 1, validated_by = ?, validated_at = ?, updated_at = datetime('now') WHERE source_path = ?",
@@ -780,43 +760,19 @@ def set_validated_by_source(
             "UPDATE reactions SET validated = 0, validated_by = NULL, validated_at = NULL, updated_at = datetime('now') WHERE source_path = ?",
             (src_canon,),
         )
-    updated = cur.rowcount
-    if updated == 0:
-        # Fallback: match by filename suffix to handle legacy absolute paths
-        filename = Path(source_path).name
-        if validated:
-            cur = con.execute(
-                "UPDATE reactions SET validated = 1, validated_by = ?, validated_at = ?, updated_at = datetime('now') WHERE source_path LIKE '%' || ?",
-                (by, at_iso, filename),
-            )
-        else:
-            cur = con.execute(
-                "UPDATE reactions SET validated = 0, validated_by = NULL, validated_at = NULL, updated_at = datetime('now') WHERE source_path LIKE '%' || ?",
-                (filename,),
-            )
-        updated = cur.rowcount
     con.commit()
-    return updated
+    return cur.rowcount
 
 
 def delete_reactions_by_source(
     con: sqlite3.Connection,
     source_path: str,
 ) -> int:
-    """Delete reactions (and cascading measurements) for a given source path.
-
-    Matches by canonical relative path; if 0 deleted, falls back to filename suffix match.
-    Returns number of reaction rows deleted.
-    """
+    """Delete reactions (and cascading measurements) for one exact source path."""
     src_canon = canonicalize_source_path(source_path)
     cur = con.execute("DELETE FROM reactions WHERE source_path = ?", (src_canon,))
-    deleted = cur.rowcount
-    if deleted == 0:
-        filename = Path(source_path).name
-        cur = con.execute("DELETE FROM reactions WHERE source_path LIKE '%' || ?", (filename,))
-        deleted = cur.rowcount
     con.commit()
-    return deleted
+    return cur.rowcount
 
 
 def list_reactions(
@@ -882,7 +838,6 @@ def get_validation_meta_by_source(con: sqlite3.Connection, source_path: str) -> 
 
     Structure: {'validated': bool, 'by': str|None, 'at': str|None, 'skipped': bool, 'skipped_by': str|None, 'skipped_at': str|None}
 
-    Attempts exact canonical match first, then falls back to filename match.
     If multiple rows exist for the same source, prefer any row with validated=1,
     otherwise return the first row's metadata (likely None).
     """
@@ -891,12 +846,6 @@ def get_validation_meta_by_source(con: sqlite3.Connection, source_path: str) -> 
         "SELECT validated, validated_by, validated_at, skipped, skipped_by, skipped_at FROM reactions WHERE source_path = ? ORDER BY validated DESC, skipped DESC LIMIT 1",
         (src_canon,),
     ).fetchone()
-    if not row:
-        filename = Path(source_path).name
-        row = con.execute(
-            "SELECT validated, validated_by, validated_at, skipped, skipped_by, skipped_at FROM reactions WHERE source_path LIKE '%' || ? ORDER BY validated DESC, skipped DESC LIMIT 1",
-            (filename,),
-        ).fetchone()
     if not row:
         return {
             "validated": False,
@@ -926,12 +875,6 @@ def get_validation_meta_by_image(con: sqlite3.Connection, png_path: str) -> dict
         "SELECT validated, validated_by, validated_at, skipped, skipped_by, skipped_at FROM reactions WHERE png_path = ? ORDER BY validated DESC, skipped DESC LIMIT 1",
         (src_canon,),
     ).fetchone()
-    if not row:
-        filename = Path(png_path).name
-        row = con.execute(
-            "SELECT validated, validated_by, validated_at, skipped, skipped_by, skipped_at FROM reactions WHERE png_path LIKE '%' || ? ORDER BY validated DESC, skipped DESC LIMIT 1",
-            (filename,),
-        ).fetchone()
     if not row:
         return {
             "validated": False,
@@ -971,22 +914,8 @@ def set_validated_by_image(
             "UPDATE reactions SET validated = 0, validated_by = NULL, validated_at = NULL, updated_at = datetime('now') WHERE png_path = ?",
             (src_canon,),
         )
-    updated = cur.rowcount
-    if updated == 0:
-        filename = Path(png_path).name
-        if validated:
-            cur = con.execute(
-                "UPDATE reactions SET validated = 1, validated_by = ?, validated_at = ?, updated_at = datetime('now') WHERE png_path LIKE '%' || ?",
-                (by, at_iso, filename),
-            )
-        else:
-            cur = con.execute(
-                "UPDATE reactions SET validated = 0, validated_by = NULL, validated_at = NULL, updated_at = datetime('now') WHERE png_path LIKE '%' || ?",
-                (filename,),
-            )
-        updated = cur.rowcount
     con.commit()
-    return updated
+    return cur.rowcount
 
 
 def set_skipped_by_source(
@@ -999,7 +928,6 @@ def set_skipped_by_source(
 ) -> int:
     """Set skipped flag and metadata for all reactions from a given source path."""
     src_canon = canonicalize_source_path(source_path)
-    # First try exact canonical match
     if skipped:
         cur = con.execute(
             "UPDATE reactions SET skipped = 1, skipped_by = ?, skipped_at = ?, updated_at = datetime('now') WHERE source_path = ?",
@@ -1010,23 +938,8 @@ def set_skipped_by_source(
             "UPDATE reactions SET skipped = 0, skipped_by = NULL, skipped_at = NULL, updated_at = datetime('now') WHERE source_path = ?",
             (src_canon,),
         )
-    updated = cur.rowcount
-    if updated == 0:
-        # Fallback: match by filename suffix
-        filename = Path(source_path).name
-        if skipped:
-            cur = con.execute(
-                "UPDATE reactions SET skipped = 1, skipped_by = ?, skipped_at = ?, updated_at = datetime('now') WHERE source_path LIKE '%' || ?",
-                (by, at_iso, filename),
-            )
-        else:
-            cur = con.execute(
-                "UPDATE reactions SET skipped = 0, skipped_by = NULL, skipped_at = NULL, updated_at = datetime('now') WHERE source_path LIKE '%' || ?",
-                (filename,),
-            )
-        updated = cur.rowcount
     con.commit()
-    return updated
+    return cur.rowcount
 
 
 def set_skipped_by_image(
@@ -1049,22 +962,8 @@ def set_skipped_by_image(
             "UPDATE reactions SET skipped = 0, skipped_by = NULL, skipped_at = NULL, updated_at = datetime('now') WHERE png_path = ?",
             (src_canon,),
         )
-    updated = cur.rowcount
-    if updated == 0:
-        filename = Path(png_path).name
-        if skipped:
-            cur = con.execute(
-                "UPDATE reactions SET skipped = 1, skipped_by = ?, skipped_at = ?, updated_at = datetime('now') WHERE png_path LIKE '%' || ?",
-                (by, at_iso, filename),
-            )
-        else:
-            cur = con.execute(
-                "UPDATE reactions SET skipped = 0, skipped_by = NULL, skipped_at = NULL, updated_at = datetime('now') WHERE png_path LIKE '%' || ?",
-                (filename,),
-            )
-        updated = cur.rowcount
     con.commit()
-    return updated
+    return cur.rowcount
 
 
 def get_validation_meta_bulk(
@@ -1097,30 +996,6 @@ def get_validation_meta_bulk(
         if orig_path not in result:  # First match (highest validated due to ORDER BY)
             result[orig_path] = {"validated": bool(row[1]), "by": row[2], "at": row[3]}
             found_sources.add(orig_path)
-
-    # For unmatched paths, try filename fallback (batch by unique filenames)
-    unmatched = [p for p in source_paths if p not in found_sources]
-    if unmatched:
-        filename_to_paths: dict[str, list[str]] = {}
-        for path in unmatched:
-            filename = Path(path).name
-            if filename not in filename_to_paths:
-                filename_to_paths[filename] = []
-            filename_to_paths[filename].append(path)
-
-        for filename, paths in filename_to_paths.items():
-            row = con.execute(
-                "SELECT validated, validated_by, validated_at FROM reactions WHERE source_path LIKE '%' || ? ORDER BY validated DESC LIMIT 1",
-                (filename,),
-            ).fetchone()
-
-            meta = (
-                {"validated": bool(row[0]), "by": row[1], "at": row[2]}
-                if row
-                else {"validated": False, "by": None, "at": None}
-            )
-            for path in paths:
-                result[path] = meta
 
     # Fill in any remaining paths with default values
     for path in source_paths:
