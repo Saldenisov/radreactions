@@ -64,6 +64,11 @@ def test_legacy_default_password_account_is_disabled(monkeypatch, tmp_path):
     with migrated_db._connect() as con:
         assert con.execute("SELECT is_active FROM users WHERE username = 'legacy'").fetchone()[0] == 0
 
+    monkeypatch.setenv("RAD_PUBLIC_BOOTSTRAP_ADMIN_USERNAME", "legacy")
+    monkeypatch.setenv("RAD_PUBLIC_BOOTSTRAP_ADMIN_PASSWORD", "replacement-password")
+    recovered_db = module.UserAuthDB(path)
+    assert recovered_db.authenticate_user("legacy", "replacement-password")[0]
+
 
 def test_session_expiry_is_timezone_aware_utc(monkeypatch, tmp_path):
     module = _load_auth(

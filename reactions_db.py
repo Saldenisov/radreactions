@@ -27,7 +27,7 @@ def connect(db_path: Path = DB_PATH, *, read_only: bool = False) -> sqlite3.Conn
     if not path.is_file():
         raise ReactionDatabaseUnavailable(f"Reaction database is unavailable: {path}")
     if read_only:
-        con = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
+        con = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
     else:
         con = sqlite3.connect(str(path))
     con.row_factory = sqlite3.Row
@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS references_map (
   doi TEXT UNIQUE,
   doi_status TEXT NOT NULL DEFAULT 'unknown',
   bibtex TEXT,
+  source_url TEXT,
   raw_text TEXT,
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -183,6 +184,8 @@ def initialize_db(db_path: Path = DB_PATH) -> sqlite3.Connection:
         con.execute("ALTER TABLE references_map ADD COLUMN raw_text TEXT")
     if "bibtex" not in cols_ref:
         con.execute("ALTER TABLE references_map ADD COLUMN bibtex TEXT")
+    if "source_url" not in cols_ref:
+        con.execute("ALTER TABLE references_map ADD COLUMN source_url TEXT")
     reference_columns = {
         "doi_score": "REAL",
         "doi_resolver": "TEXT",
@@ -819,7 +822,7 @@ def get_reaction_with_measurements(con: sqlite3.Connection, reaction_id: int) ->
         return {}
     ms = con.execute(
         """
-        SELECT m.*, re.buxton_code, re.citation_text, re.doi, re.doi_status,
+        SELECT m.*, re.buxton_code, re.citation_text, re.doi, re.doi_status, re.source_url,
                re.doi_score, re.doi_resolver, re.doi_validation_notes,
                re.doi_title_similarity_score, re.doi_title_similarity_level,
                re.doi_trust_level, re.doi_trust_notes

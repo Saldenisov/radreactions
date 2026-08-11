@@ -108,14 +108,22 @@ class UserAuthDB:
         password = os.getenv("RAD_PUBLIC_BOOTSTRAP_ADMIN_PASSWORD") or ""
         if not username or not password:
             return
-        if len(username) > 128 or len(password) < 12:
+        if (
+            len(username) > 128
+            or len(password) < 12
+            or secrets.compare_digest(password, _LEGACY_DEFAULT_PASSWORD.decode())
+        ):
             return
         with self.lock, self._connect() as con:
             con.execute(
                 """
                 INSERT INTO users (username, password_hash, created_at, role)
                 VALUES (?, ?, ?, 'admin')
-                ON CONFLICT(username) DO NOTHING
+                ON CONFLICT(username) DO UPDATE SET
+                    password_hash = excluded.password_hash,
+                    is_active = 1,
+                    role = 'admin'
+                WHERE users.is_active = 0
                 """,
                 (username, self._hash_password(password), _iso_now()),
             )

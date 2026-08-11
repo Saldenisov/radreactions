@@ -11,6 +11,7 @@ from typing import Any
 LEGACY_DEFAULT_HASH_SALT = "radreactions-public-usage"
 DEFAULT_RETENTION_DAYS = 90
 MAX_RETENTION_DAYS = 365
+QUERY_KEYS = {"q", "query", "search_query"}
 
 
 def configured_hash_salt(value: str | None) -> str | None:
@@ -27,7 +28,7 @@ def hash_identifier(value: str, salt: str | None) -> str:
     clean = value.strip()
     if not clean or not normalized_salt:
         return ""
-    return hashlib.sha256(f"{normalized_salt}:{clean}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{normalized_salt}:{clean}".encode()).hexdigest()
 
 
 def retention_days(value: str | None) -> int:
@@ -37,6 +38,18 @@ def retention_days(value: str | None) -> int:
     except ValueError:
         return DEFAULT_RETENTION_DAYS
     return min(max(days, 1), MAX_RETENTION_DAYS)
+
+
+def _without_query_fields(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _without_query_fields(item)
+            for key, item in value.items()
+            if key.lower() not in QUERY_KEYS
+        }
+    if isinstance(value, list):
+        return [_without_query_fields(item) for item in value]
+    return value
 
 
 def connect(path: Path, *, retention_days_value: int = DEFAULT_RETENTION_DAYS) -> sqlite3.Connection:
@@ -63,6 +76,32 @@ def connect(path: Path, *, retention_days_value: int = DEFAULT_RETENTION_DAYS) -
     con.execute("CREATE INDEX IF NOT EXISTS idx_usage_events_created ON usage_events(created_at)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_usage_events_ip ON usage_events(ip_hash)")
     con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS usage_schema_migrations (
+          name TEXT PRIMARY KEY,
+          applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+    scrub_migration = "001_scrub_search_queries"
+    if con.execute(
+        "SELECT 1 FROM usage_schema_migrations WHERE name = ?", (scrub_migration,)
+    ).fetchone() is None:
+        rows = con.execute(
+            "SELECT id, metadata_json FROM usage_events WHERE event_type = 'search'"
+        ).fetchall()
+        for row in rows:
+            try:
+                metadata = json.loads(str(row["metadata_json"] or "{}"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                metadata = {}
+            safe_metadata = _without_query_fields(metadata)
+            con.execute(
+                "UPDATE usage_events SET metadata_json = ? WHERE id = ?",
+                (json.dumps(safe_metadata, ensure_ascii=False, sort_keys=True), row["id"]),
+            )
+        con.execute("INSERT INTO usage_schema_migrations(name) VALUES (?)", (scrub_migration,))
+    con.execute(
         "DELETE FROM usage_events WHERE julianday(created_at) < julianday('now', ?)",
         (f"-{retention_days_value} days",),
     )
@@ -82,11 +121,7 @@ def write_event(
     metadata: dict[str, Any] | None = None,
 ) -> None:
     """Write one event after removing raw search query fields from metadata."""
-    safe_metadata = {
-        key: value
-        for key, value in (metadata or {}).items()
-        if key.lower() not in {"q", "query", "search_query"}
-    }
+    safe_metadata = _without_query_fields(metadata or {})
     con.execute(
         """
         INSERT INTO usage_events (

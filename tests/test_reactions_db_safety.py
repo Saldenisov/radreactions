@@ -57,6 +57,7 @@ def test_explicit_initialization_includes_public_export_columns(monkeypatch, tmp
     finally:
         con.close()
     assert "bibtex" in columns
+    assert "source_url" in columns
 
 
 def test_malformed_fts_query_is_safe(monkeypatch, tmp_path):

@@ -1,3 +1,5 @@
+# ruff: noqa: E402
+
 import csv
 import json
 import os
@@ -29,17 +31,21 @@ PUBLIC_DATA_DIR = Path(
 )
 os.environ["DATA_DIR"] = str(PUBLIC_DATA_DIR)
 
-from config import BASE_DIR  # noqa: E402
-from auth_db import auth_db, check_authentication, login_user, logout_user  # noqa: E402
-from public_reactions import is_public_buxton_reaction  # noqa: E402
-from public_telemetry import (  # noqa: E402
+from auth_db import auth_db, check_authentication, login_user, logout_user
+from config import BASE_DIR
+from public_reactions import is_public_buxton_reaction
+from public_telemetry import (
     connect as usage_connect,
+)
+from public_telemetry import (
     hash_identifier,
     retention_days,
-    summary as usage_summary,
     write_event,
 )
-from reactions_db import (  # noqa: E402
+from public_telemetry import (
+    summary as usage_summary,
+)
+from reactions_db import (
     DB_PATH,
     ensure_db,
     get_reaction_with_measurements,
