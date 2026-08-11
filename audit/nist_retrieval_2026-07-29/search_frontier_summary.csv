@@ -1,0 +1,10 @@
+search_type,status,query_count,reported_records,detail_links
+product,planned,1515,0,0
+reactant,planned,6753,0,0
+reactant,retry,52,0,0
+reactant,useful,55,21172,21243
+reactant,useless,1,0,0
+solvent,planned,65,0,0
+solvent,retry,20,0,0
+solvent,useful,107,20917,25117
+solvent,useless,3,0,0

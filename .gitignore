@@ -21,7 +21,9 @@ ENV/
 # Tool caches
 .mypy_cache/
 .pytest_cache/
-ruff_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 .ipynb_checkpoints/
 
 # Data files - uploaded via admin interface
@@ -34,4 +36,6 @@ tools/bin/
 *.aux
 *.log
 *.html
+!audit/**/raw/*.html
+audit/**/request_cooldown.json
 *.tsv

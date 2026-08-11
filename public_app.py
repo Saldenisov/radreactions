@@ -1,5 +1,6 @@
+# ruff: noqa: E402
+
 import csv
-import hashlib
 import json
 import os
 import random
@@ -30,8 +31,20 @@ PUBLIC_DATA_DIR = Path(
 )
 os.environ["DATA_DIR"] = str(PUBLIC_DATA_DIR)
 
-from config import BASE_DIR
 from auth_db import auth_db, check_authentication, login_user, logout_user
+from config import BASE_DIR
+from public_reactions import is_public_buxton_reaction
+from public_telemetry import (
+    connect as usage_connect,
+)
+from public_telemetry import (
+    hash_identifier,
+    retention_days,
+    write_event,
+)
+from public_telemetry import (
+    summary as usage_summary,
+)
 from reactions_db import (
     DB_PATH,
     ensure_db,
@@ -218,7 +231,9 @@ USAGE_DB_PATH = Path(
         str(PUBLIC_DATA_DIR / "public_usage_stats.db"),
     )
 )
+USAGE_RETENTION_DAYS = retention_days(os.getenv("RAD_USAGE_RETENTION_DAYS"))
 CONTACT_EMAIL = "sergey.denisov@universite-paris-saclay.fr"
+ADMIN_EXPORT_SESSION_KEY = "admin_export_access_granted"
 
 
 def _env_path(name: str) -> Path | None:
@@ -236,29 +251,7 @@ def _iso_now() -> str:
 
 
 def _usage_connect() -> sqlite3.Connection:
-    USAGE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(str(USAGE_DB_PATH))
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA busy_timeout = 5000")
-    con.execute(
-        """
-        CREATE TABLE IF NOT EXISTS usage_events (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          created_at TEXT NOT NULL,
-          event_type TEXT NOT NULL,
-          page TEXT NOT NULL DEFAULT '',
-          item_key TEXT NOT NULL DEFAULT '',
-          ip_hash TEXT NOT NULL DEFAULT '',
-          user_agent_hash TEXT NOT NULL DEFAULT '',
-          metadata_json TEXT NOT NULL DEFAULT '{}'
-        )
-        """
-    )
-    con.execute("CREATE INDEX IF NOT EXISTS idx_usage_events_type ON usage_events(event_type)")
-    con.execute("CREATE INDEX IF NOT EXISTS idx_usage_events_created ON usage_events(created_at)")
-    con.execute("CREATE INDEX IF NOT EXISTS idx_usage_events_ip ON usage_events(ip_hash)")
-    con.commit()
-    return con
+    return usage_connect(USAGE_DB_PATH, retention_days_value=USAGE_RETENTION_DAYS)
 
 
 def _request_headers() -> dict[str, str]:
@@ -283,11 +276,7 @@ def _client_ip() -> str:
 
 
 def _hash_usage_value(value: str) -> str:
-    value = value.strip()
-    if not value:
-        return ""
-    salt = os.getenv("RAD_USAGE_HASH_SALT", "radreactions-public-usage")
-    return hashlib.sha256(f"{salt}:{value}".encode("utf-8")).hexdigest()
+    return hash_identifier(value, os.getenv("RAD_USAGE_HASH_SALT"))
 
 
 def _log_usage_event(
@@ -300,25 +289,16 @@ def _log_usage_event(
         headers = _request_headers()
         con = _usage_connect()
         try:
-            con.execute(
-                """
-                INSERT INTO usage_events (
-                    created_at, event_type, page, item_key, ip_hash,
-                    user_agent_hash, metadata_json
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    _iso_now(),
-                    event_type,
-                    page,
-                    item_key,
-                    _hash_usage_value(_client_ip()),
-                    _hash_usage_value(headers.get("user-agent", "")),
-                    json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True),
-                ),
+            write_event(
+                con,
+                created_at=_iso_now(),
+                event_type=event_type,
+                page=page,
+                item_key=item_key,
+                ip_hash=_hash_usage_value(_client_ip()),
+                user_agent_hash=_hash_usage_value(headers.get("user-agent", "")),
+                metadata=metadata,
             )
-            con.commit()
         finally:
             con.close()
         _usage_summary.clear()
@@ -345,7 +325,7 @@ def _track_search(query: str, database: str, scope: str) -> None:
         "search",
         "home",
         item_key=database,
-        metadata={"query": cleaned[:200], "database": database, "scope": scope},
+        metadata={"database": database, "scope": scope},
     )
     st.session_state["last_logged_search"] = fingerprint
 
@@ -356,22 +336,7 @@ def _usage_summary(db_mtime: float) -> dict[str, int]:
         return {"visits": 0, "searches": 0, "unique_ips": 0, "downloads": 0}
     con = _usage_connect()
     try:
-        row = con.execute(
-            """
-            SELECT
-              SUM(CASE WHEN event_type = 'visit' THEN 1 ELSE 0 END) AS visits,
-              SUM(CASE WHEN event_type = 'search' THEN 1 ELSE 0 END) AS searches,
-              SUM(CASE WHEN event_type = 'download' THEN 1 ELSE 0 END) AS downloads,
-              COUNT(DISTINCT NULLIF(ip_hash, '')) AS unique_ips
-            FROM usage_events
-            """
-        ).fetchone()
-        return {
-            "visits": int(row["visits"] or 0),
-            "searches": int(row["searches"] or 0),
-            "unique_ips": int(row["unique_ips"] or 0),
-            "downloads": int(row["downloads"] or 0),
-        }
+        return usage_summary(con)
     finally:
         con.close()
 
@@ -2624,7 +2589,7 @@ def reaction_detail_page() -> None:
 
     data = _reaction_details(reaction_id, _db_mtime())
     reaction = data.get("reaction")
-    if not reaction:
+    if not is_public_buxton_reaction(reaction, PUBLIC_TABLES):
         st.error("Buxton reaction not found.")
         return
     st.title("Buxton Reaction Detail")
@@ -2864,22 +2829,20 @@ def suggest_articles_page() -> None:
 def developer_exports_page() -> None:
     st.title("Developer Exports")
 
-    query_access_key = str(st.query_params.get("access_key", "")).strip()
     if not _admin_password_configured():
         st.error("Admin export password is not configured.")
         return
 
-    with st.form("developer_exports_access_form"):
-        access_key = st.text_input(
-            "Access key",
-            value=query_access_key,
-            type="password",
-        )
-        unlocked = st.form_submit_button("Unlock", type="primary")
-
-    has_access = _admin_password_matches(query_access_key) or (
-        unlocked and _admin_password_matches(access_key)
-    )
+    has_access = bool(st.session_state.get(ADMIN_EXPORT_SESSION_KEY, False))
+    if not has_access:
+        with st.form("developer_exports_access_form"):
+            admin_password = st.text_input("Admin password", type="password")
+            unlocked = st.form_submit_button("Unlock", type="primary")
+        if unlocked and _admin_password_matches(admin_password):
+            st.session_state[ADMIN_EXPORT_SESSION_KEY] = True
+            has_access = True
+        elif unlocked:
+            st.error("Invalid access key.")
     if not has_access:
         st.caption("Access required.")
         return
@@ -2947,12 +2910,6 @@ def developer_exports_page() -> None:
         type="primary",
         width="stretch",
     )
-
-    st.divider()
-    st.subheader("Direct Links")
-    st.code("/developer_exports_page?access_key=...&export=all_json")
-    st.code("/developer_exports_page?access_key=...&export=article_suggestions_json")
-    st.code("/developer_exports_page?access_key=...&export=reaction_reports_csv")
 
     if selected_export.endswith("_csv"):
         preview_rows = article_suggestions if selected_export.startswith("article") else reaction_reports
