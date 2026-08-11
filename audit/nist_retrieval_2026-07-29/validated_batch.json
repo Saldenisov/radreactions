@@ -1,0 +1,29 @@
+{
+  "audit_date": "2026-07-29",
+  "baseline_registry": "/Users/sad/dev/projects/radreactions/data/nist_solution/nist_archive.sqlite",
+  "baseline_registry_modified_at": "2026-07-02T12:14:59+0200",
+  "request": {
+    "method": "GET",
+    "url": "https://kinetics.nist.gov/solution/Detail?id=1990BIG/CRA619-622:2",
+    "client": "tools.nist_solution_client.fetch_nist_get",
+    "cooldown_seconds": 180,
+    "fetched_at": "2026-07-29T09:18:38.868977+00:00",
+    "http_status": 200,
+    "response_body_sha256": "94a109aece83134739db0e212fb4e120aadd86469c03598e6ff0b3c8451da582",
+    "saved_file_sha256": "a0d040b152c017c17f958e7222da95b99d7b6148501ec85a1869dff8e872ae53",
+    "saved_path": "audit/nist_retrieval_2026-07-29/raw/missing_detail_1990BIG_CRA619-622_2_20260729T091838_94a109aece83.html"
+  },
+  "validation": {
+    "parser": "/Users/sad/dev/projects/radreactions/tools/parse_nist_details.py",
+    "records": 1,
+    "measurements": 1,
+    "squib": "1990BIG/CRA619-622",
+    "reaction": "C6H5CO-C6H4CH2SO3- + C6H5COHC6H4CH2SO3- -> dimer",
+    "solvent": "H2O",
+    "rate_constant": "6.3E6",
+    "reaction_order": "2",
+    "raw_ph": "-997",
+    "warning": "NIST returned raw pH=-997. Preserved without interpretation or normalization."
+  },
+  "registry_update": false
+}

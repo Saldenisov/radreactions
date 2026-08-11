@@ -37,4 +37,5 @@ tools/bin/
 *.log
 *.html
 !audit/**/raw/*.html
+audit/**/request_cooldown.json
 *.tsv
